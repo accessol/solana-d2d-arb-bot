@@ -1,6 +1,7 @@
 // src/dex/pump.ts
 import { Connection, PublicKey, AccountInfo } from "@solana/web3.js";
 import { PumpAmmSdk } from "@pump-fun/pump-swap-sdk";
+import * as borsh from "borsh";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -404,4 +405,3 @@ export function clearPoolCache(): void {
 
 // Export types and constants for external use
 export { PUMPSWAP_POOL, MINT, BASE_MINT, PoolAccount };
-export type { PumpPool };
