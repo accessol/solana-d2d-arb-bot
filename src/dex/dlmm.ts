@@ -115,10 +115,16 @@ export async function getDLMMPrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
+
+    // Get bin arrays for swap
+    const binArrays = await dlmm.getBinArrayForSwap(false); // false for X to Y swap
+
+    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      MINT, // Target token (TokenA)
       inputAmount,
-      slippage * 100 // Convert to percentage
+      false, // swapYtoX = false (swapping X to Y, i.e., target token to base token)
+      slippage * 100, // Convert to percentage
+      binArrays
     );
 
     return quote.outAmount.toNumber();
@@ -143,10 +149,16 @@ export async function getDLMMReversePrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
+
+    // Get bin arrays for swap
+    const binArrays = await dlmm.getBinArrayForSwap(true); // true for Y to X swap
+
+    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      BASE_MINT, // Base token (WSOL/USDC)
       inputAmount,
-      slippage * 100 // Convert to percentage
+      true, // swapYtoX = true (swapping Y to X, i.e., base token to target token)
+      slippage * 100, // Convert to percentage
+      binArrays
     );
 
     return quote.outAmount.toNumber();
@@ -172,14 +184,17 @@ export async function getDLMMSwapQuote(
 ): Promise<SwapQuoteInfo> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-    const inputMint = direction === "sell" ? MINT : BASE_MINT;
     const swapYtoX = direction === "buy";
 
+    // Get bin arrays for swap
+    const binArrays = await dlmm.getBinArrayForSwap(swapYtoX);
+
+    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      inputMint,
       inputAmount,
+      swapYtoX,
       slippage * 100, // Convert to percentage
-      swapYtoX
+      binArrays
     );
 
     return {
@@ -190,7 +205,7 @@ export async function getDLMMSwapQuote(
       minOutputAmount:
         quote.minOutAmount?.toNumber() ||
         quote.outAmount.toNumber() * (1 - slippage),
-      binArraysPubkey: quote.binArraysPubkey || [],
+      binArraysPubkey: binArrays.map((ba) => ba.publicKey),
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
