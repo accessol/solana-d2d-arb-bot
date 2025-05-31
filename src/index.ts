@@ -1,10 +1,17 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { getConnection, loadKeypair } from "./solana";
+import { logInfo } from "./logger";
+import { startScanner } from "./scanner";
 
 (async () => {
   const connection = getConnection();
   const wallet = loadKeypair();
 
+  logInfo(`Wallet: ${wallet.publicKey.toBase58()}`);
   const balance = await connection.getBalance(wallet.publicKey);
-  console.log(`Wallet: ${wallet.publicKey.toBase58()}`);
-  console.log(`Balance: ${balance / 1e9} SOL`);
+  logInfo(`Balance: ${balance / 1e9} SOL`);
+
+  await startScanner(connection);
 })();
