@@ -1,25 +1,436 @@
 // src/dex/dlmm.ts
 import { Connection, PublicKey } from "@solana/web3.js";
-import { DLMM } from "@meteora-ag/dlmm";
+import DLMM from "@meteora-ag/dlmm";
 import dotenv from "dotenv";
+
 dotenv.config();
 
+// Environment variables
 const DLMM_POOL = new PublicKey(process.env.DLMM_POOL!);
 const MINT = new PublicKey(process.env.MINT!);
 const BASE_MINT = new PublicKey(process.env.BASE_MINT!);
 
+// Pool information interface based on DLMM SDK
+interface DLMMPoolInfo {
+  pubkey: PublicKey;
+  tokenMintA: PublicKey;
+  tokenMintB: PublicKey;
+  reserveA: bigint;
+  reserveB: bigint;
+  binStep: number;
+  baseFactor: number;
+  activeId: number;
+  maxId: number;
+  minId: number;
+  protocolFee: number;
+  lpFeeRate: number;
+  status: number;
+  pairType: number;
+  whitelisted: boolean;
+  tokenADecimals: number;
+  tokenBDecimals: number;
+}
+
+// Swap quote interface
+interface SwapQuoteInfo {
+  inputAmount: number;
+  outputAmount: number;
+  fee: number;
+  priceImpact: number;
+  minOutputAmount: number;
+  binArraysPubkey: PublicKey[];
+}
+
+// Cache for pool data to avoid repeated fetches
+let poolCache: DLMMPoolInfo | null = null;
+let poolCacheTimestamp = 0;
+const CACHE_DURATION = 60000; // 1 minute cache
+
+/**
+ * Fetch DLMM pool information
+ */
+async function fetchPoolData(
+  connection: Connection,
+  poolAddress: PublicKey
+): Promise<DLMMPoolInfo> {
+  // Check cache first
+  const now = Date.now();
+  if (poolCache && now - poolCacheTimestamp < CACHE_DURATION) {
+    return poolCache;
+  }
+
+  try {
+    const dlmm = await DLMM.create(connection, poolAddress);
+
+    if (!dlmm) {
+      throw new Error(`Pool not found: ${poolAddress.toString()}`);
+    }
+
+    // Access the pool state from the DLMM instance
+    const lbPair = dlmm.lbPair;
+
+    const pool: DLMMPoolInfo = {
+      pubkey: poolAddress,
+      tokenMintA: lbPair.tokenXMint,
+      tokenMintB: lbPair.tokenYMint,
+      reserveA: BigInt(lbPair.reserveX?.toString() || "0"),
+      reserveB: BigInt(lbPair.reserveY?.toString() || "0"),
+      binStep: lbPair.binStep,
+      baseFactor: lbPair.parameters?.baseFactor || 0,
+      activeId: lbPair.activeId,
+      maxId: 0, // Will be fetched separately if needed
+      minId: 0, // Will be fetched separately if needed
+      protocolFee: lbPair.parameters?.protocolShare || 0,
+      lpFeeRate: lbPair.parameters?.baseFactor || 0,
+      status: lbPair.status || 0,
+      pairType: lbPair.pairType || 0,
+      whitelisted: false, // Default value
+      tokenADecimals: 9, // Default, should be fetched from token metadata
+      tokenBDecimals: 9, // Default, should be fetched from token metadata
+    };
+
+    // Update cache
+    poolCache = pool;
+    poolCacheTimestamp = now;
+
+    return pool;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error fetching DLMM pool data:", errMsg);
+    throw new Error(`Failed to fetch DLMM pool data: ${errMsg}`);
+  }
+}
+
+/**
+ * Get DLMM swap price/quote for selling target token (TokenA) for base token
+ * @param connection - Solana connection
+ * @param inputAmount - Amount of target token to swap (in target token units)
+ * @param slippage - Slippage tolerance (default 0.5%)
+ * @returns Output amount in base token units
+ */
 export async function getDLMMPrice(
   connection: Connection,
-  inputAmount: number // in TARGET token (TokenA)
+  inputAmount: number,
+  slippage: number = 0.005
 ): Promise<number> {
-  const dlmm = new DLMM(connection);
-  const quote = await dlmm.getSwapQuote({
-    pool: DLMM_POOL,
-    inputMint: MINT, // You’re selling TokenA
-    outputMint: BASE_MINT, // You’re getting WSOL or USDC
-    inputAmount,
-    slippage: Number(process.env.SLIPPAGE || 0.5),
-  });
+  try {
+    const dlmm = await DLMM.create(connection, DLMM_POOL);
+    const quote = dlmm.swapQuote(
+      MINT, // Target token (TokenA)
+      inputAmount,
+      slippage * 100 // Convert to percentage
+    );
 
-  return quote.outputAmount;
+    return quote.outAmount.toNumber();
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM price:", errMsg);
+    throw new Error(`Failed to get DLMM price: ${errMsg}`);
+  }
 }
+
+/**
+ * Get reverse quote (buying target token with base token)
+ * @param connection - Solana connection
+ * @param inputAmount - Amount of base token to swap
+ * @param slippage - Slippage tolerance (default 0.5%)
+ * @returns Output amount in target token units
+ */
+export async function getDLMMReversePrice(
+  connection: Connection,
+  inputAmount: number,
+  slippage: number = 0.005
+): Promise<number> {
+  try {
+    const dlmm = await DLMM.create(connection, DLMM_POOL);
+    const quote = dlmm.swapQuote(
+      BASE_MINT, // Base token (WSOL/USDC)
+      inputAmount,
+      slippage * 100 // Convert to percentage
+    );
+
+    return quote.outAmount.toNumber();
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM reverse price:", errMsg);
+    throw new Error(`Failed to get DLMM reverse price: ${errMsg}`);
+  }
+}
+
+/**
+ * Get detailed swap quote with price impact and fees
+ * @param connection - Solana connection
+ * @param inputAmount - Amount to swap
+ * @param direction - Swap direction ("sell" for target->base, "buy" for base->target)
+ * @param slippage - Slippage tolerance
+ */
+export async function getDLMMSwapQuote(
+  connection: Connection,
+  inputAmount: number,
+  direction: "sell" | "buy" = "sell",
+  slippage: number = 0.005
+): Promise<SwapQuoteInfo> {
+  try {
+    const dlmm = await DLMM.create(connection, DLMM_POOL);
+    const inputMint = direction === "sell" ? MINT : BASE_MINT;
+    const swapYtoX = direction === "buy";
+
+    const quote = dlmm.swapQuote(
+      inputMint,
+      inputAmount,
+      slippage * 100, // Convert to percentage
+      swapYtoX
+    );
+
+    return {
+      inputAmount: inputAmount,
+      outputAmount: quote.outAmount.toNumber(),
+      fee: quote.fee.toNumber() || 0,
+      priceImpact: quote.priceImpact?.toNumber() || 0,
+      minOutputAmount:
+        quote.minOutAmount?.toNumber() ||
+        quote.outAmount.toNumber() * (1 - slippage),
+      binArraysPubkey: quote.binArraysPubkey || [],
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM swap quote:", errMsg);
+    throw new Error(`Failed to get DLMM swap quote: ${errMsg}`);
+  }
+}
+
+/**
+ * Get current pool price information
+ * @param connection - Solana connection
+ * @returns Price information and pool details
+ */
+export async function getDLMMPoolPrice(connection: Connection): Promise<{
+  tokenAToTokenBPrice: number;
+  tokenBToTokenAPrice: number;
+  activePrice: number;
+  poolAddress: string;
+  poolInfo: DLMMPoolInfo;
+}> {
+  try {
+    const pool = await fetchPoolData(connection, DLMM_POOL);
+    const dlmm = await DLMM.create(connection, DLMM_POOL);
+
+    // Get active bin information
+    const activeBin = await dlmm.getActiveBin();
+    const activePrice = parseFloat(activeBin.price) || 0;
+
+    // Calculate unit prices for both directions
+    const unitAmount = 1;
+
+    const [tokenBFromA, tokenAFromB] = await Promise.all([
+      getDLMMPrice(connection, unitAmount, 0.001),
+      getDLMMReversePrice(connection, unitAmount, 0.001),
+    ]);
+
+    return {
+      tokenAToTokenBPrice: tokenBFromA / unitAmount,
+      tokenBToTokenAPrice: tokenAFromB / unitAmount,
+      activePrice,
+      poolAddress: DLMM_POOL.toString(),
+      poolInfo: pool,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM pool price:", errMsg);
+    throw new Error(`Failed to get DLMM pool price: ${errMsg}`);
+  }
+}
+
+/**
+ * Calculate price impact for a potential swap
+ * @param connection - Solana connection
+ * @param inputAmount - Amount to swap
+ * @param direction - Swap direction ("sell" or "buy")
+ * @param slippage - Slippage tolerance
+ */
+export async function calculateDLMMPriceImpact(
+  connection: Connection,
+  inputAmount: number,
+  direction: "sell" | "buy" = "sell",
+  slippage: number = 0.005
+): Promise<{
+  outputAmount: number;
+  priceImpact: number;
+  effectivePrice: number;
+  fee: number;
+  poolInfo: DLMMPoolInfo;
+}> {
+  try {
+    const pool = await fetchPoolData(connection, DLMM_POOL);
+    const quote = await getDLMMSwapQuote(
+      connection,
+      inputAmount,
+      direction,
+      slippage
+    );
+    const poolPriceInfo = await getDLMMPoolPrice(connection);
+
+    const currentPrice =
+      direction === "sell"
+        ? poolPriceInfo.tokenAToTokenBPrice
+        : poolPriceInfo.tokenBToTokenAPrice;
+
+    const expectedOutput = inputAmount * currentPrice;
+    const priceImpact =
+      ((expectedOutput - quote.outputAmount) / expectedOutput) * 100;
+    const effectivePrice = quote.outputAmount / inputAmount;
+
+    return {
+      outputAmount: quote.outputAmount,
+      priceImpact: Math.max(0, priceImpact), // Ensure non-negative
+      effectivePrice,
+      fee: quote.fee,
+      poolInfo: pool,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error calculating DLMM price impact:", errMsg);
+    throw new Error(`Failed to calculate DLMM price impact: ${errMsg}`);
+  }
+}
+
+/**
+ * Get bin information around the active bin
+ * @param connection - Solana connection
+ * @param binRange - Number of bins to retrieve on each side of active bin (default 10)
+ */
+export async function getDLMMBinInfo(
+  connection: Connection,
+  binRange: number = 10
+): Promise<{
+  activeBinId: number;
+  bins: Array<{
+    binId: number;
+    price: number;
+    liquidityX: bigint;
+    liquidityY: bigint;
+    supply: bigint;
+  }>;
+}> {
+  try {
+    const pool = await fetchPoolData(connection, DLMM_POOL);
+    const dlmm = await DLMM.create(connection, DLMM_POOL);
+
+    const activeBinId = pool.activeId;
+
+    // Get bins around active bin - using both left and right parameters
+    const binsResult = await dlmm.getBinsAroundActiveBin(binRange, binRange);
+
+    const bins = binsResult.bins.map((bin) => {
+      // Calculate price from bin ID using the formula
+      const binStep = pool.binStep;
+      const price = Math.pow(1 + binStep / 10000, bin.binId - pool.activeId);
+
+      return {
+        binId: bin.binId,
+        price,
+        liquidityX: bin.xAmount,
+        liquidityY: bin.yAmount,
+        supply: bin.supply,
+      };
+    });
+
+    return {
+      activeBinId,
+      bins: bins.filter((bin) => bin.price > 0), // Filter out empty bins
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM bin info:", errMsg);
+    throw new Error(`Failed to get DLMM bin info: ${errMsg}`);
+  }
+}
+
+/**
+ * Get detailed pool information
+ * @param connection - Solana connection
+ * @returns Complete pool information
+ */
+export async function getDLMMPoolInfo(
+  connection: Connection
+): Promise<DLMMPoolInfo> {
+  return await fetchPoolData(connection, DLMM_POOL);
+}
+
+/**
+ * Get pool statistics
+ * @param connection - Solana connection
+ */
+export async function getDLMMPoolStats(connection: Connection): Promise<{
+  totalLiquidity: {
+    tokenA: bigint;
+    tokenB: bigint;
+  };
+  activeBinId: number;
+  binStep: number;
+  fees: {
+    protocolFee: number;
+    lpFeeRate: number;
+  };
+  utilization: number;
+  poolInfo: DLMMPoolInfo;
+}> {
+  try {
+    const pool = await fetchPoolData(connection, DLMM_POOL);
+
+    // Calculate utilization based on active vs total range
+    const totalRange = pool.maxId - pool.minId;
+    const utilization = totalRange > 0 ? 1 : 0; // Simplified calculation
+
+    return {
+      totalLiquidity: {
+        tokenA: pool.reserveA,
+        tokenB: pool.reserveB,
+      },
+      activeBinId: pool.activeId,
+      binStep: pool.binStep,
+      fees: {
+        protocolFee: pool.protocolFee,
+        lpFeeRate: pool.lpFeeRate,
+      },
+      utilization,
+      poolInfo: pool,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting DLMM pool stats:", errMsg);
+    throw new Error(`Failed to get DLMM pool stats: ${errMsg}`);
+  }
+}
+
+/**
+ * Validate DLMM pool configuration
+ */
+export function validateDLMMConfig(): void {
+  if (!process.env.DLMM_POOL) {
+    throw new Error("DLMM_POOL environment variable is required");
+  }
+  if (!process.env.MINT) {
+    throw new Error("MINT environment variable is required");
+  }
+  if (!process.env.BASE_MINT) {
+    throw new Error("BASE_MINT environment variable is required");
+  }
+
+  console.log("DLMM Pool configuration:");
+  console.log(`Pool Address: ${DLMM_POOL.toString()}`);
+  console.log(`Target Token (A): ${MINT.toString()}`);
+  console.log(`Base Token (B): ${BASE_MINT.toString()}`);
+}
+
+/**
+ * Clear cache function (useful for testing or manual cache invalidation)
+ */
+export function clearDLMMCache(): void {
+  poolCache = null;
+  poolCacheTimestamp = 0;
+}
+
+// Export types and constants for external use
+export { DLMM_POOL, MINT, BASE_MINT };
+export type { DLMMPoolInfo, SwapQuoteInfo };
