@@ -3,6 +3,7 @@ import { Connection, PublicKey, AccountInfo } from "@solana/web3.js";
 import { PumpAmmSdk } from "@pump-fun/pump-swap-sdk";
 import * as borsh from "borsh";
 import dotenv from "dotenv";
+import BN from "bn.js";
 
 dotenv.config();
 
@@ -196,6 +197,15 @@ function manualDeserializePoolAccount(data: Buffer): PoolAccount {
   });
 }
 
+// Helper to get decimals for a mint (WSOL=9, USDC=6, fallback=9)
+function getTokenDecimals(mint: PublicKey): number {
+  if (mint.toString() === "So11111111111111111111111111111111111111112")
+    return 9; // WSOL
+  if (mint.toString() === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    return 6; // USDC
+  return 9;
+}
+
 /**
  * Get PumpSwap price/quote for a given input amount
  * @param connection - Solana connection
@@ -211,15 +221,18 @@ export async function getPumpSwapPrice(
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
-
-    const outputAmount = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
+    // Convert inputAmount to BN in base token's smallest units
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
+    const outputAmountBN = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
       pool.pubkey,
-      inputAmount,
+      inputAmountBN,
       slippage,
       "baseToQuote"
     );
-
-    return outputAmount;
+    // Convert output to number in target token units
+    const targetDecimals = getTokenDecimals(MINT);
+    return Number(outputAmountBN.toString()) / 10 ** targetDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error getting PumpSwap price:", errMsg);
@@ -242,15 +255,20 @@ export async function getPumpSwapReversePrice(
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
-
-    const outputAmount = await pumpAmmSdk.swapAutocompleteBaseFromQuote(
+    // Convert inputAmount to BN in target token's smallest units
+    const targetDecimals = getTokenDecimals(MINT);
+    const inputAmountBN = new BN(
+      Math.floor(inputAmount * 10 ** targetDecimals)
+    );
+    const outputAmountBN = await pumpAmmSdk.swapAutocompleteBaseFromQuote(
       pool.pubkey,
-      inputAmount,
+      inputAmountBN,
       slippage,
       "quoteToBase"
     );
-
-    return outputAmount;
+    // Convert output to number in base token units
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    return Number(outputAmountBN.toString()) / 10 ** baseDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error getting PumpSwap reverse price:", errMsg);
@@ -273,27 +291,36 @@ export async function getPumpSwapPoolPrice(connection: Connection): Promise<{
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
 
-    const baseAmount = 1;
-    const quoteAmount = 1;
+    // Use BN for amounts
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const targetDecimals = getTokenDecimals(MINT);
+    const baseAmountBN = new BN(10 ** baseDecimals); // 1 base token
+    const quoteAmountBN = new BN(10 ** targetDecimals); // 1 target token
 
-    const [quoteFromBase, baseFromQuote] = await Promise.all([
+    const [quoteFromBaseBN, baseFromQuoteBN] = await Promise.all([
       pumpAmmSdk.swapAutocompleteQuoteFromBase(
         pool.pubkey,
-        baseAmount,
+        baseAmountBN,
         0.01,
         "baseToQuote"
       ),
       pumpAmmSdk.swapAutocompleteBaseFromQuote(
         pool.pubkey,
-        quoteAmount,
+        quoteAmountBN,
         0.01,
         "quoteToBase"
       ),
     ]);
 
+    // Convert BN to numbers
+    const quoteFromBase =
+      Number(quoteFromBaseBN.toString()) / 10 ** targetDecimals;
+    const baseFromQuote =
+      Number(baseFromQuoteBN.toString()) / 10 ** baseDecimals;
+
     return {
-      baseToQuotePrice: quoteFromBase / baseAmount,
-      quoteToBasePrice: baseFromQuote / quoteAmount,
+      baseToQuotePrice: quoteFromBase / 1, // 1 base token
+      quoteToBasePrice: baseFromQuote / 1, // 1 quote token
       poolAddress: PUMPSWAP_POOL.toString(),
       poolInfo: pool,
     };
@@ -331,20 +358,32 @@ export async function calculatePriceImpact(
     let currentPrice: number;
 
     if (direction === "baseToQuote") {
-      outputAmount = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
+      const baseDecimals = getTokenDecimals(BASE_MINT);
+      const inputAmountBN = new BN(
+        Math.floor(inputAmount * 10 ** baseDecimals)
+      );
+      const outputAmountBN = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
         pool.pubkey,
-        inputAmount,
+        inputAmountBN,
         slippage,
         "baseToQuote"
       );
+      const targetDecimals = getTokenDecimals(MINT);
+      outputAmount = Number(outputAmountBN.toString()) / 10 ** targetDecimals;
       currentPrice = poolPriceInfo.baseToQuotePrice;
     } else {
-      outputAmount = await pumpAmmSdk.swapAutocompleteBaseFromQuote(
+      const targetDecimals = getTokenDecimals(MINT);
+      const inputAmountBN = new BN(
+        Math.floor(inputAmount * 10 ** targetDecimals)
+      );
+      const outputAmountBN = await pumpAmmSdk.swapAutocompleteBaseFromQuote(
         pool.pubkey,
-        inputAmount,
+        inputAmountBN,
         slippage,
         "quoteToBase"
       );
+      const baseDecimals = getTokenDecimals(BASE_MINT);
+      outputAmount = Number(outputAmountBN.toString()) / 10 ** baseDecimals;
       currentPrice = poolPriceInfo.quoteToBasePrice;
     }
 

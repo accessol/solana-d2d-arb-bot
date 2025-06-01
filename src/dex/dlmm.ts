@@ -2,6 +2,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import DLMM from "@meteora-ag/dlmm";
 import dotenv from "dotenv";
+import BN from "bn.js";
 
 dotenv.config();
 
@@ -45,6 +46,15 @@ interface SwapQuoteInfo {
 let poolCache: DLMMPoolInfo | null = null;
 let poolCacheTimestamp = 0;
 const CACHE_DURATION = 60000; // 1 minute cache
+
+// Helper to get decimals for a mint (WSOL=9, USDC=6, fallback=9)
+function getTokenDecimals(mint: PublicKey): number {
+  if (mint.toString() === "So11111111111111111111111111111111111111112")
+    return 9; // WSOL
+  if (mint.toString() === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    return 6; // USDC
+  return 9;
+}
 
 /**
  * Fetch DLMM pool information
@@ -115,19 +125,21 @@ export async function getDLMMPrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-
-    // Get bin arrays for swap
+    const targetDecimals = getTokenDecimals(MINT);
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    // inputAmount is in target token units (e.g., USDC)
+    const inputAmountBN = new BN(
+      Math.floor(inputAmount * 10 ** targetDecimals)
+    );
     const binArrays = await dlmm.getBinArrayForSwap(false); // false for X to Y swap
-
-    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      inputAmount,
-      false, // swapYtoX = false (swapping X to Y, i.e., target token to base token)
-      slippage * 100, // Convert to percentage
+      inputAmountBN,
+      false,
+      new BN(Math.floor(slippage * 100)),
       binArrays
     );
-
-    return quote.outAmount.toNumber();
+    // output is in base token units (WSOL)
+    return Number(quote.outAmount.toString()) / 10 ** baseDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error getting DLMM price:", errMsg);
@@ -149,19 +161,19 @@ export async function getDLMMReversePrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-
-    // Get bin arrays for swap
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const targetDecimals = getTokenDecimals(MINT);
+    // inputAmount is in base token units (WSOL)
+    const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
     const binArrays = await dlmm.getBinArrayForSwap(true); // true for Y to X swap
-
-    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      inputAmount,
-      true, // swapYtoX = true (swapping Y to X, i.e., base token to target token)
-      slippage * 100, // Convert to percentage
+      inputAmountBN,
+      true,
+      new BN(Math.floor(slippage * 100)),
       binArrays
     );
-
-    return quote.outAmount.toNumber();
+    // output is in target token units (e.g., USDC)
+    return Number(quote.outAmount.toString()) / 10 ** targetDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error getting DLMM reverse price:", errMsg);
@@ -185,27 +197,35 @@ export async function getDLMMSwapQuote(
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
     const swapYtoX = direction === "buy";
-
-    // Get bin arrays for swap
+    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const targetDecimals = getTokenDecimals(MINT);
+    const inputAmountBN = new BN(
+      Math.floor(inputAmount * 10 ** (swapYtoX ? baseDecimals : targetDecimals))
+    );
     const binArrays = await dlmm.getBinArrayForSwap(swapYtoX);
-
-    // swapQuote expects: inputAmount, swapYtoX, slippage, binArrays, maxExtraBinArrays
     const quote = dlmm.swapQuote(
-      inputAmount,
+      inputAmountBN,
       swapYtoX,
-      slippage * 100, // Convert to percentage
+      new BN(Math.floor(slippage * 100)),
       binArrays
     );
-
     return {
       inputAmount: inputAmount,
-      outputAmount: quote.outAmount.toNumber(),
-      fee: quote.fee.toNumber() || 0,
+      outputAmount:
+        Number(quote.outAmount.toString()) /
+        10 ** (swapYtoX ? targetDecimals : baseDecimals),
+      fee: quote.fee
+        ? Number(quote.fee.toString()) /
+          10 ** (swapYtoX ? targetDecimals : baseDecimals)
+        : 0,
       priceImpact: quote.priceImpact?.toNumber() || 0,
-      minOutputAmount:
-        quote.minOutAmount?.toNumber() ||
-        quote.outAmount.toNumber() * (1 - slippage),
-      binArraysPubkey: binArrays.map((ba) => ba.publicKey),
+      minOutputAmount: quote.minOutAmount
+        ? Number(quote.minOutAmount.toString()) /
+          10 ** (swapYtoX ? targetDecimals : baseDecimals)
+        : (Number(quote.outAmount.toString()) /
+            10 ** (swapYtoX ? targetDecimals : baseDecimals)) *
+          (1 - slippage),
+      binArraysPubkey: binArrays.map((ba: any) => ba.publicKey),
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -330,29 +350,22 @@ export async function getDLMMBinInfo(
   try {
     const pool = await fetchPoolData(connection, DLMM_POOL);
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-
     const activeBinId = pool.activeId;
-
-    // Get bins around active bin - using both left and right parameters
     const binsResult = await dlmm.getBinsAroundActiveBin(binRange, binRange);
-
-    const bins = binsResult.bins.map((bin) => {
-      // Calculate price from bin ID using the formula
+    const bins = binsResult.bins.map((bin: any) => {
       const binStep = pool.binStep;
       const price = Math.pow(1 + binStep / 10000, bin.binId - pool.activeId);
-
       return {
         binId: bin.binId,
         price,
-        liquidityX: bin.xAmount,
-        liquidityY: bin.yAmount,
-        supply: bin.supply,
+        liquidityX: BigInt(bin.xAmount.toString()),
+        liquidityY: BigInt(bin.yAmount.toString()),
+        supply: BigInt(bin.supply.toString()),
       };
     });
-
     return {
       activeBinId,
-      bins: bins.filter((bin) => bin.price > 0), // Filter out empty bins
+      bins: bins.filter((bin: any) => bin.price > 0),
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

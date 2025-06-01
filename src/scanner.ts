@@ -20,7 +20,7 @@ const DRY_RUN = process.env.DRY_RUN === "true";
 
 // Arbitrage opportunity interface
 interface ArbitrageOpportunity {
-  direction: "pump-to-dlmm" | "dlmm-to-pump";
+  direction: "PUMP-TO-DLMM" | "DLMM-TO-PUMP";
   buyAmount: number;
   sellAmount: number;
   profit: number;
@@ -195,6 +195,10 @@ async function checkPumpToDLMM(
       wsolAmount,
       0.01
     );
+    // Debug: log targetTokenAmount and units
+    logInfo(
+      `PumpSwap: For ${wsolAmount} WSOL, get ${targetTokenAmount} target tokens`
+    );
 
     // Step 2: Sell target token on DLMM for WSOL
     const wsolReceived = await getDLMMPrice(
@@ -202,12 +206,16 @@ async function checkPumpToDLMM(
       targetTokenAmount,
       0.005
     );
+    // Debug: log wsolReceived and units
+    logInfo(
+      `DLMM: For ${targetTokenAmount} target tokens, get ${wsolReceived} WSOL`
+    );
 
     const profit = wsolReceived - wsolAmount;
     const profitPct = (profit / wsolAmount) * 100;
 
     return {
-      direction: "pump-to-dlmm",
+      direction: "PUMP-TO-DLMM",
       buyAmount: wsolAmount,
       sellAmount: wsolReceived,
       profit,
@@ -240,6 +248,10 @@ async function checkDLMMToPump(
       wsolAmount,
       0.005
     );
+    // Debug: log targetTokenAmount and units
+    logInfo(
+      `DLMM: For ${wsolAmount} WSOL, get ${targetTokenAmount} target tokens`
+    );
 
     // Step 2: Sell target token on PumpSwap for WSOL
     const wsolReceived = await getPumpSwapReversePrice(
@@ -247,12 +259,16 @@ async function checkDLMMToPump(
       targetTokenAmount,
       0.01
     );
+    // Debug: log wsolReceived and units
+    logInfo(
+      `PumpSwap: For ${targetTokenAmount} target tokens, get ${wsolReceived} WSOL`
+    );
 
     const profit = wsolReceived - wsolAmount;
     const profitPct = (profit / wsolAmount) * 100;
 
     return {
-      direction: "dlmm-to-pump",
+      direction: "DLMM-TO-PUMP",
       buyAmount: wsolAmount,
       sellAmount: wsolReceived,
       profit,
