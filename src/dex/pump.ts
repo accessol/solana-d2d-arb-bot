@@ -224,15 +224,26 @@ export async function getPumpSwapPrice(
     // Convert inputAmount to BN in base token's smallest units
     const baseDecimals = getTokenDecimals(BASE_MINT);
     const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
+    // Debug: print inputAmount, inputAmountBN, baseDecimals
+    console.log(
+      `[DEBUG] PumpSwap input: ${inputAmount} base token (${BASE_MINT.toString()}), BN: ${inputAmountBN.toString()}, decimals: ${baseDecimals}`
+    );
     const outputAmountBN = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
       pool.pubkey,
       inputAmountBN,
       slippage,
       "baseToQuote"
     );
+    // Debug: print outputAmountBN
+    console.log(`[DEBUG] PumpSwap output BN: ${outputAmountBN.toString()}`);
     // Convert output to number in target token units
     const targetDecimals = getTokenDecimals(MINT);
-    return Number(outputAmountBN.toString()) / 10 ** targetDecimals;
+    const output = Number(outputAmountBN.toString()) / 10 ** targetDecimals;
+    // Debug: print output and targetDecimals
+    console.log(
+      `[DEBUG] PumpSwap output: ${output} target token (${MINT.toString()}), decimals: ${targetDecimals}`
+    );
+    return output;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("Error getting PumpSwap price:", errMsg);
