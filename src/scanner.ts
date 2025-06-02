@@ -199,7 +199,8 @@ async function checkPumpToDLMM(
   connection: Connection,
   wsolAmount: number
 ): Promise<ArbitrageOpportunity | null> {
-  try {    // Step 1: Buy target token on PumpSwap with WSOL
+  try {
+    // Step 1: Buy target token on PumpSwap with WSOL
     const targetTokenAmount = await getPumpSwapPriceFixed(
       connection,
       wsolAmount,
