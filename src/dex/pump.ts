@@ -12,59 +12,63 @@ const PUMPSWAP_POOL = new PublicKey(process.env.PUMPSWAP_POOL!);
 const MINT = new PublicKey(process.env.MINT!);
 const BASE_MINT = new PublicKey(process.env.BASE_MINT!);
 
-// Complete Pool interface based on PumpSwap SDK requirements
+// Corrected Pool interface based on actual SolScan data
 export interface PumpPool {
   pubkey: PublicKey;
+  pool_bump: number;
+  index: number; // Changed from number to match u16
+  creator: PublicKey;
   base_mint: PublicKey;
   quote_mint: PublicKey;
-  creator: PublicKey;
-  index: number;
   lp_mint: PublicKey;
-  lp_supply: bigint;
   pool_base_token_account: PublicKey;
   pool_quote_token_account: PublicKey;
-  pool_bump: number;
+  lp_supply: bigint;
+  coin_creator: PublicKey; // Added missing field
 }
 
-// Borsh schema for deserializing pool account data
+// Corrected Borsh schema class
 class PoolAccount {
+  pool_bump!: number;
+  index!: number;
+  creator!: Uint8Array;
   base_mint!: Uint8Array;
   quote_mint!: Uint8Array;
-  creator!: Uint8Array;
-  index!: number;
   lp_mint!: Uint8Array;
-  lp_supply!: bigint;
   pool_base_token_account!: Uint8Array;
   pool_quote_token_account!: Uint8Array;
-  pool_bump!: number;
+  lp_supply!: bigint;
+  coin_creator!: Uint8Array;
 
   constructor(fields: {
+    pool_bump: number;
+    index: number;
+    creator: Uint8Array;
     base_mint: Uint8Array;
     quote_mint: Uint8Array;
-    creator: Uint8Array;
-    index: number;
     lp_mint: Uint8Array;
-    lp_supply: bigint;
     pool_base_token_account: Uint8Array;
     pool_quote_token_account: Uint8Array;
-    pool_bump: number;
+    lp_supply: bigint;
+    coin_creator: Uint8Array;
   }) {
     Object.assign(this, fields);
   }
 }
 
-// Borsh schema definition for pool account
+// Corrected Borsh schema definition matching SolScan structure
 const poolAccountSchema = {
   struct: {
+    pool_bump: "u8",
+    index: "u16", // Changed from u64 to u16
+    creator: { array: { type: "u8", len: 32 } },
     base_mint: { array: { type: "u8", len: 32 } },
     quote_mint: { array: { type: "u8", len: 32 } },
-    creator: { array: { type: "u8", len: 32 } },
-    index: "u64",
     lp_mint: { array: { type: "u8", len: 32 } },
-    lp_supply: "u64",
     pool_base_token_account: { array: { type: "u8", len: 32 } },
     pool_quote_token_account: { array: { type: "u8", len: 32 } },
-    pool_bump: "u8",
+    lp_supply: "u64",
+    coin_creator: { array: { type: "u8", len: 32 } }, // Added missing field
   },
 };
 
@@ -96,20 +100,21 @@ async function fetchPoolData(
     // Deserialize pool account data
     const poolData = deserializePoolAccount(poolAccountInfo);
 
-    // Create Pool object
+    // Create Pool object with corrected field order
     const pool: PumpPool = {
       pubkey: poolAddress,
+      pool_bump: poolData.pool_bump,
+      index: poolData.index,
+      creator: new PublicKey(poolData.creator),
       base_mint: new PublicKey(poolData.base_mint),
       quote_mint: new PublicKey(poolData.quote_mint),
-      creator: new PublicKey(poolData.creator),
-      index: poolData.index,
       lp_mint: new PublicKey(poolData.lp_mint),
-      lp_supply: poolData.lp_supply,
       pool_base_token_account: new PublicKey(poolData.pool_base_token_account),
       pool_quote_token_account: new PublicKey(
         poolData.pool_quote_token_account
       ),
-      pool_bump: poolData.pool_bump,
+      lp_supply: poolData.lp_supply,
+      coin_creator: new PublicKey(poolData.coin_creator),
     };
 
     // Update cache
@@ -135,15 +140,16 @@ function deserializePoolAccount(accountInfo: AccountInfo<Buffer>): PoolAccount {
 
     // Create PoolAccount instance from deserialized data
     return new PoolAccount({
+      pool_bump: result.pool_bump,
+      index: Number(result.index),
+      creator: new Uint8Array(result.creator),
       base_mint: new Uint8Array(result.base_mint),
       quote_mint: new Uint8Array(result.quote_mint),
-      creator: new Uint8Array(result.creator),
-      index: Number(result.index),
       lp_mint: new Uint8Array(result.lp_mint),
-      lp_supply: BigInt(result.lp_supply),
       pool_base_token_account: new Uint8Array(result.pool_base_token_account),
       pool_quote_token_account: new Uint8Array(result.pool_quote_token_account),
-      pool_bump: result.pool_bump,
+      lp_supply: BigInt(result.lp_supply),
+      coin_creator: new Uint8Array(result.coin_creator),
     });
   } catch (error) {
     console.error("Error deserializing pool account:", error);
@@ -153,10 +159,20 @@ function deserializePoolAccount(accountInfo: AccountInfo<Buffer>): PoolAccount {
 }
 
 /**
- * Manual deserialization fallback for pool account data
+ * Manual deserialization fallback for pool account data - CORRECTED ORDER
  */
 function manualDeserializePoolAccount(data: Buffer): PoolAccount {
   let offset = 8; // Skip discriminator
+
+  // Read fields in the correct order based on SolScan data
+  const pool_bump = data.readUInt8(offset);
+  offset += 1;
+
+  const index = data.readUInt16LE(offset); // Changed from readBigUInt64LE to readUInt16LE
+  offset += 2; // Changed from 8 to 2 bytes
+
+  const creator = data.slice(offset, offset + 32);
+  offset += 32;
 
   const base_mint = data.slice(offset, offset + 32);
   offset += 32;
@@ -164,17 +180,8 @@ function manualDeserializePoolAccount(data: Buffer): PoolAccount {
   const quote_mint = data.slice(offset, offset + 32);
   offset += 32;
 
-  const creator = data.slice(offset, offset + 32);
-  offset += 32;
-
-  const index = data.readBigUInt64LE(offset);
-  offset += 8;
-
   const lp_mint = data.slice(offset, offset + 32);
   offset += 32;
-
-  const lp_supply = data.readBigUInt64LE(offset);
-  offset += 8;
 
   const pool_base_token_account = data.slice(offset, offset + 32);
   offset += 32;
@@ -182,18 +189,22 @@ function manualDeserializePoolAccount(data: Buffer): PoolAccount {
   const pool_quote_token_account = data.slice(offset, offset + 32);
   offset += 32;
 
-  const pool_bump = data.readUInt8(offset);
+  const lp_supply = data.readBigUInt64LE(offset);
+  offset += 8;
+
+  const coin_creator = data.slice(offset, offset + 32); // Added missing field
 
   return new PoolAccount({
+    pool_bump,
+    index: Number(index),
+    creator,
     base_mint,
     quote_mint,
-    creator,
-    index: Number(index),
     lp_mint,
-    lp_supply,
     pool_base_token_account,
     pool_quote_token_account,
-    pool_bump,
+    lp_supply,
+    coin_creator,
   });
 }
 
@@ -451,6 +462,188 @@ export function validatePoolConfig(): void {
 export function clearPoolCache(): void {
   poolCache = null;
   poolCacheTimestamp = 0;
+}
+
+// ================== DEBUGGING FUNCTIONS ==================
+
+/**
+ * Debug pool structure to understand token roles
+ */
+export async function debugPoolStructure(
+  connection: Connection
+): Promise<void> {
+  try {
+    const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
+    console.log("=== POOL STRUCTURE DEBUG ===");
+    console.log(`Pool Address: ${pool.pubkey.toString()}`);
+    console.log(`Pool Base Mint: ${pool.base_mint.toString()}`);
+    console.log(`Pool Quote Mint: ${pool.quote_mint.toString()}`);
+    console.log(`Pool Bump: ${pool.pool_bump}`);
+    console.log(`Pool Index: ${pool.index}`);
+    console.log(`Creator: ${pool.creator.toString()}`);
+    console.log(`Coin Creator: ${pool.coin_creator.toString()}`);
+    console.log(`LP Mint: ${pool.lp_mint.toString()}`);
+    console.log(`LP Supply: ${pool.lp_supply.toString()}`);
+    console.log("Your Environment Variables:");
+    console.log(`BASE_MINT: ${BASE_MINT.toString()}`);
+    console.log(`MINT (target): ${MINT.toString()}`);
+
+    // Check if your env vars match the pool structure
+    const baseMatches = pool.base_mint.equals(BASE_MINT);
+    const quoteMatches = pool.quote_mint.equals(MINT);
+    const baseMatchesTarget = pool.base_mint.equals(MINT);
+    const quoteMatchesBase = pool.quote_mint.equals(BASE_MINT);
+
+    console.log(`\nMatching Analysis:`);
+    console.log(`Pool base == your BASE_MINT: ${baseMatches}`);
+    console.log(`Pool quote == your MINT: ${quoteMatches}`);
+    console.log(`Pool base == your MINT: ${baseMatchesTarget}`);
+    console.log(`Pool quote == your BASE_MINT: ${quoteMatchesBase}`);
+
+    if (baseMatchesTarget && quoteMatchesBase) {
+      console.log(
+        "\n🚨 ISSUE FOUND: Your BASE_MINT and MINT variables are swapped!"
+      );
+      console.log("The pool's base token is what you call MINT (target token)");
+      console.log("The pool's quote token is what you call BASE_MINT");
+    }
+  } catch (error) {
+    console.error("Error debugging pool structure:", error);
+  }
+}
+
+/**
+ * Get pool token balances for additional debugging
+ */
+export async function getPoolBalances(connection: Connection): Promise<{
+  baseBalance: number;
+  quoteBalance: number;
+  baseToken: string;
+  quoteToken: string;
+}> {
+  try {
+    const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
+
+    // Get token account balances
+    const [baseAccountInfo, quoteAccountInfo] = await Promise.all([
+      connection.getTokenAccountBalance(pool.pool_base_token_account),
+      connection.getTokenAccountBalance(pool.pool_quote_token_account),
+    ]);
+
+    const baseBalance =
+      Number(baseAccountInfo.value.amount) /
+      10 ** baseAccountInfo.value.decimals;
+    const quoteBalance =
+      Number(quoteAccountInfo.value.amount) /
+      10 ** quoteAccountInfo.value.decimals;
+
+    console.log(`\n=== POOL BALANCES ===`);
+    console.log(`Base token (${pool.base_mint.toString()}): ${baseBalance}`);
+    console.log(`Quote token (${pool.quote_mint.toString()}): ${quoteBalance}`);
+    console.log(
+      `Current pool ratio: 1 base = ${quoteBalance / baseBalance} quote`
+    );
+    console.log(
+      `Current pool ratio: 1 quote = ${baseBalance / quoteBalance} base`
+    );
+
+    return {
+      baseBalance,
+      quoteBalance,
+      baseToken: pool.base_mint.toString(),
+      quoteToken: pool.quote_mint.toString(),
+    };
+  } catch (error) {
+    console.error("Error getting pool balances:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fixed version of getPumpSwapPrice with proper direction detection
+ */
+export async function getPumpSwapPriceFixed(
+  connection: Connection,
+  inputAmount: number,
+  slippage: number = 0.01
+): Promise<number> {
+  try {
+    const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
+    const pumpAmmSdk = new PumpAmmSdk(connection);
+
+    // First, determine the correct swap direction based on pool structure
+    const isSwappingFromPoolBase = pool.base_mint.equals(BASE_MINT);
+    const isSwappingFromPoolQuote = pool.quote_mint.equals(BASE_MINT);
+
+    console.log(`\n=== SWAP DEBUG ===`);
+    console.log(`Pool base mint: ${pool.base_mint.toString()}`);
+    console.log(`Pool quote mint: ${pool.quote_mint.toString()}`);
+    console.log(`Your input token (BASE_MINT): ${BASE_MINT.toString()}`);
+    console.log(`Your output token (MINT): ${MINT.toString()}`);
+    console.log(`Swapping FROM pool base: ${isSwappingFromPoolBase}`);
+    console.log(`Swapping FROM pool quote: ${isSwappingFromPoolQuote}`);
+
+    let outputAmountBN: BN;
+    let inputDecimals: number;
+    let outputDecimals: number;
+
+    if (isSwappingFromPoolBase) {
+      // You're swapping from pool's base token to pool's quote token
+      inputDecimals = getTokenDecimals(BASE_MINT);
+      outputDecimals = getTokenDecimals(MINT);
+      const inputAmountBN = new BN(
+        Math.floor(inputAmount * 10 ** inputDecimals)
+      );
+
+      console.log(`Using swapAutocompleteQuoteFromBase`);
+      console.log(
+        `Input: ${inputAmount} tokens = ${inputAmountBN.toString()} smallest units (${inputDecimals} decimals)`
+      );
+
+      outputAmountBN = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
+        pool.pubkey,
+        inputAmountBN,
+        slippage,
+        "baseToQuote"
+      );
+    } else if (isSwappingFromPoolQuote) {
+      // You're swapping from pool's quote token to pool's base token
+      inputDecimals = getTokenDecimals(BASE_MINT);
+      outputDecimals = getTokenDecimals(MINT);
+      const inputAmountBN = new BN(
+        Math.floor(inputAmount * 10 ** inputDecimals)
+      );
+
+      console.log(`Using swapAutocompleteBaseFromQuote`);
+      console.log(
+        `Input: ${inputAmount} tokens = ${inputAmountBN.toString()} smallest units (${inputDecimals} decimals)`
+      );
+
+      outputAmountBN = await pumpAmmSdk.swapAutocompleteBaseFromQuote(
+        pool.pubkey,
+        inputAmountBN,
+        slippage,
+        "quoteToBase"
+      );
+    } else {
+      throw new Error(
+        `Token mismatch: BASE_MINT ${BASE_MINT.toString()} doesn't match pool base ${pool.base_mint.toString()} or quote ${pool.quote_mint.toString()}`
+      );
+    }
+
+    const output = Number(outputAmountBN.toString()) / 10 ** outputDecimals;
+
+    console.log(
+      `Output: ${outputAmountBN.toString()} smallest units = ${output} tokens (${outputDecimals} decimals)`
+    );
+    console.log(`Rate: 1 input token = ${output / inputAmount} output tokens`);
+
+    return output;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("Error getting PumpSwap price:", errMsg);
+    throw new Error(`Failed to get PumpSwap price: ${errMsg}`);
+  }
 }
 
 // Export types and constants for external use

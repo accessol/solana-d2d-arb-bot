@@ -4,6 +4,9 @@ import {
   getPumpSwapPrice,
   getPumpSwapReversePrice,
   validatePoolConfig as validatePumpConfig,
+  debugPoolStructure,
+  getPoolBalances,
+  getPumpSwapPriceFixed,
 } from "./dex/pump";
 import {
   getDLMMPrice,
@@ -43,6 +46,14 @@ export async function initializeScanner() {
 
     // Validate Solana connection and wallet
     const { connection, wallet, publicKey } = await validateSolanaConfig();
+
+    // Add debug analysis of pool structure
+    logInfo("\n🔍 Analyzing PumpSwap pool structure...");
+    await debugPoolStructure(connection);
+
+    // Get pool balances
+    logInfo("\n💰 Current pool balances:");
+    await getPoolBalances(connection);
 
     // Validate DEX pool configurations
     validatePumpConfig();
@@ -188,9 +199,8 @@ async function checkPumpToDLMM(
   connection: Connection,
   wsolAmount: number
 ): Promise<ArbitrageOpportunity | null> {
-  try {
-    // Step 1: Buy target token on PumpSwap with WSOL
-    const targetTokenAmount = await getPumpSwapPrice(
+  try {    // Step 1: Buy target token on PumpSwap with WSOL
+    const targetTokenAmount = await getPumpSwapPriceFixed(
       connection,
       wsolAmount,
       0.01
@@ -253,8 +263,9 @@ async function checkDLMMToPump(
       `DLMM: For ${wsolAmount} WSOL, get ${targetTokenAmount} target tokens`
     );
 
-    // Step 2: Sell target token on PumpSwap for WSOL
-    const wsolReceived = await getPumpSwapReversePrice(
+    // Step 2: Sell target token on PumpSwap for WSOL    // Debug the reverse swap as well
+    logInfo("\nDebug reverse swap:");
+    const wsolReceived = await getPumpSwapPriceFixed(
       connection,
       targetTokenAmount,
       0.01
