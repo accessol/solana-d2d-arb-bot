@@ -45,7 +45,7 @@ interface SwapQuoteInfo {
 // Cache for pool data to avoid repeated fetches
 let poolCache: DLMMPoolInfo | null = null;
 let poolCacheTimestamp = 0;
-const CACHE_DURATION = 60000; // 1 minute cache
+const CACHE_DURATION = parseInt(process.env.CACHE_DURATION || "60000"); // 1 minute cache
 
 // Helper to get decimals for a mint (WSOL=9, USDC=6, fallback=9)
 function getTokenDecimals(mint: PublicKey): number {
@@ -118,10 +118,11 @@ async function fetchPoolData(
  * @param slippage - Slippage tolerance (default 0.5%)
  * @returns Output amount in base token units
  */
+const DEFAULT_SLIPPAGE = parseFloat(process.env.SLIPPAGE || "0.005");
 export async function getDLMMPrice(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.005
+  slippage: number = DEFAULT_SLIPPAGE
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
@@ -157,7 +158,7 @@ export async function getDLMMPrice(
 export async function getDLMMReversePrice(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.005
+  slippage: number = DEFAULT_SLIPPAGE
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
@@ -192,7 +193,7 @@ export async function getDLMMSwapQuote(
   connection: Connection,
   inputAmount: number,
   direction: "sell" | "buy" = "sell",
-  slippage: number = 0.005
+  slippage: number = DEFAULT_SLIPPAGE
 ): Promise<SwapQuoteInfo> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);

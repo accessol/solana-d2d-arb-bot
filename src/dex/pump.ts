@@ -75,7 +75,7 @@ const poolAccountSchema = {
 // Cache for pool data to avoid repeated fetches
 let poolCache: PumpPool | null = null;
 let poolCacheTimestamp = 0;
-const CACHE_DURATION = 60000; // 1 minute cache
+const CACHE_DURATION = parseInt(process.env.CACHE_DURATION || "60000"); // 1 minute cache
 
 /**
  * Fetch pool data from the blockchain
@@ -217,6 +217,8 @@ function getTokenDecimals(mint: PublicKey): number {
   return 9;
 }
 
+const DEFAULT_SLIPPAGE = parseFloat(process.env.SLIPPAGE || "0.01");
+
 /**
  * Get PumpSwap price/quote for a given input amount
  * @param connection - Solana connection
@@ -227,7 +229,7 @@ function getTokenDecimals(mint: PublicKey): number {
 export async function getPumpSwapPrice(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.01
+  slippage: number = DEFAULT_SLIPPAGE
 ): Promise<number> {
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
@@ -272,7 +274,7 @@ export async function getPumpSwapPrice(
 export async function getPumpSwapReversePrice(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.01
+  slippage: number = DEFAULT_SLIPPAGE
 ): Promise<number> {
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
@@ -565,7 +567,7 @@ export async function getPoolBalances(connection: Connection): Promise<{
 export async function getPumpSwapPriceFixed(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.01,
+  slippage: number = DEFAULT_SLIPPAGE,
   direction: "baseToQuote" | "quoteToBase"
 ): Promise<number> {
   try {
