@@ -204,7 +204,8 @@ async function checkPumpToDLMM(
     const targetTokenAmount = await getPumpSwapPriceFixed(
       connection,
       wsolAmount,
-      0.01
+      0.01,
+      "quoteToBase" // Correct direction for WSOL → USDC
     );
     // Debug: log targetTokenAmount and units
     logInfo(
@@ -269,7 +270,8 @@ async function checkDLMMToPump(
     const wsolReceived = await getPumpSwapPriceFixed(
       connection,
       targetTokenAmount,
-      0.01
+      0.01,
+      "baseToQuote" // Correct direction for USDC → WSOL
     );
     // Debug: log wsolReceived and units
     logInfo(

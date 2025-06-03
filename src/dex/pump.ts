@@ -565,32 +565,21 @@ export async function getPoolBalances(connection: Connection): Promise<{
 export async function getPumpSwapPriceFixed(
   connection: Connection,
   inputAmount: number,
-  slippage: number = 0.01
+  slippage: number = 0.01,
+  direction: "baseToQuote" | "quoteToBase"
 ): Promise<number> {
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
 
-    // First, determine the correct swap direction based on pool structure
-    const isSwappingFromPoolBase = pool.base_mint.equals(BASE_MINT);
-    const isSwappingFromPoolQuote = pool.quote_mint.equals(BASE_MINT);
-
-    console.log(`\n=== SWAP DEBUG ===`);
-    console.log(`Pool base mint: ${pool.base_mint.toString()}`);
-    console.log(`Pool quote mint: ${pool.quote_mint.toString()}`);
-    console.log(`Your input token (BASE_MINT): ${BASE_MINT.toString()}`);
-    console.log(`Your output token (MINT): ${MINT.toString()}`);
-    console.log(`Swapping FROM pool base: ${isSwappingFromPoolBase}`);
-    console.log(`Swapping FROM pool quote: ${isSwappingFromPoolQuote}`);
-
     let outputAmountBN: BN;
     let inputDecimals: number;
     let outputDecimals: number;
 
-    if (isSwappingFromPoolBase) {
-      // You're swapping from pool's base token to pool's quote token
-      inputDecimals = getTokenDecimals(BASE_MINT);
-      outputDecimals = getTokenDecimals(MINT);
+    if (direction === "baseToQuote") {
+      // Swapping from pool's base token (USDC) to pool's quote token (WSOL)
+      inputDecimals = getTokenDecimals(MINT);
+      outputDecimals = getTokenDecimals(BASE_MINT);
       const inputAmountBN = new BN(
         Math.floor(inputAmount * 10 ** inputDecimals)
       );
@@ -606,8 +595,8 @@ export async function getPumpSwapPriceFixed(
         slippage,
         "baseToQuote"
       );
-    } else if (isSwappingFromPoolQuote) {
-      // You're swapping from pool's quote token to pool's base token
+    } else if (direction === "quoteToBase") {
+      // Swapping from pool's quote token (WSOL) to pool's base token (USDC)
       inputDecimals = getTokenDecimals(BASE_MINT);
       outputDecimals = getTokenDecimals(MINT);
       const inputAmountBN = new BN(
@@ -626,9 +615,7 @@ export async function getPumpSwapPriceFixed(
         "quoteToBase"
       );
     } else {
-      throw new Error(
-        `Token mismatch: BASE_MINT ${BASE_MINT.toString()} doesn't match pool base ${pool.base_mint.toString()} or quote ${pool.quote_mint.toString()}`
-      );
+      throw new Error(`Invalid swap direction: ${direction}`);
     }
 
     const output = Number(outputAmountBN.toString()) / 10 ** outputDecimals;
