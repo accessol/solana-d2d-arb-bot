@@ -444,7 +444,7 @@ export function validatePoolConfig(): void {
     throw new Error("BASE_MINT environment variable is required");
   }
 
-  logInfo("Pool configuration:");
+  logInfo("💊 PumpSwap Pool configuration:");
   logInfo(`Pool Address: ${PUMPSWAP_POOL.toString()}`);
   logInfo(`Target Token: ${MINT.toString()}`);
   logInfo(`Base Token: ${BASE_MINT.toString()}`);
