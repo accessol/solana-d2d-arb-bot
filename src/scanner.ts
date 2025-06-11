@@ -14,7 +14,7 @@ import {
   validateDLMMConfig,
 } from "./dex/dlmm";
 import { getConnection, validateSolanaConfig, logSolanaConfig } from "./solana";
-import { logInfo, logWarn, logError } from "./logger";
+import { logInfo, logWarn, logError, formatOpportunity } from "./logger";
 
 const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT || "0.3");
 const PROCESS_DELAY = parseInt(process.env.PROCESS_DELAY || "3000");
@@ -107,21 +107,7 @@ export async function startScanner(connection: Connection) {
               bestOpportunity = opp;
             }
 
-            logInfo(`\n🟢 ARBITRAGE OPPORTUNITY DETECTED!`);
-            logInfo(`   Direction: ${opp.direction.toUpperCase()}`);
-            logInfo(
-              `   Buy on ${opp.buyExchange}: ${opp.buyAmount.toFixed(6)} WSOL`
-            );
-            logInfo(
-              `   Sell on ${opp.sellExchange}: ${opp.sellAmount.toFixed(
-                6
-              )} WSOL`
-            );
-            logInfo(
-              `   Profit: ${opp.profit.toFixed(
-                6
-              )} WSOL (${opp.profitPct.toFixed(3)}%)`
-            );
+            logInfo("\n" + formatOpportunity(opp));
 
             if (DRY_RUN) {
               logInfo(`   🔍 DRY RUN: Trade simulation only`);

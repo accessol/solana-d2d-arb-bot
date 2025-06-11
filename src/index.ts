@@ -119,7 +119,7 @@ async function runMarketAnalysis() {
 }
 
 function showHelp() {
-  console.log(`
+  logInfo(`
 🤖 Solana Arbitrage Scanner
 
 USAGE:

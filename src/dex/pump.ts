@@ -4,6 +4,7 @@ import { PumpAmmSdk } from "@pump-fun/pump-swap-sdk";
 import * as borsh from "borsh";
 import dotenv from "dotenv";
 import BN from "bn.js";
+import { logDebug, logError, logInfo, logWarn } from "../logger";
 
 dotenv.config();
 
@@ -124,7 +125,7 @@ async function fetchPoolData(
     return pool;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error fetching pool data:", errMsg);
+    logError(`Error fetching pool data: ${errMsg}`);
     throw new Error(`Failed to fetch pool data: ${errMsg}`);
   }
 }
@@ -152,7 +153,7 @@ function deserializePoolAccount(accountInfo: AccountInfo<Buffer>): PoolAccount {
       coin_creator: new Uint8Array(result.coin_creator),
     });
   } catch (error) {
-    console.error("Error deserializing pool account:", error);
+    logError(`Error deserializing pool account: ${error}`);
     // Fallback: manual deserialization if Borsh fails
     return manualDeserializePoolAccount(accountInfo.data);
   }
@@ -229,8 +230,8 @@ export async function getPumpSwapPrice(
     const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
     const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
     // Debug: print inputAmount, inputAmountBN, baseDecimals
-    console.log(
-      `[DEBUG] PumpSwap input: ${inputAmount} base token (${BASE_MINT.toString()}), BN: ${inputAmountBN.toString()}, decimals: ${baseDecimals}`
+    logDebug(
+      `PumpSwap input: ${inputAmount} base token (${BASE_MINT.toString()}), BN: ${inputAmountBN.toString()}, decimals: ${baseDecimals}`
     );
     const outputAmountBN = await pumpAmmSdk.swapAutocompleteQuoteFromBase(
       pool.pubkey,
@@ -239,18 +240,18 @@ export async function getPumpSwapPrice(
       "baseToQuote"
     );
     // Debug: print outputAmountBN
-    console.log(`[DEBUG] PumpSwap output BN: ${outputAmountBN.toString()}`);
+    logDebug(`PumpSwap output BN: ${outputAmountBN.toString()}`);
     // Convert output to number in target token units
     const targetDecimals = await getTokenDecimals(connection, MINT);
     const output = Number(outputAmountBN.toString()) / 10 ** targetDecimals;
     // Debug: print output and targetDecimals
-    console.log(
-      `[DEBUG] PumpSwap output: ${output} target token (${MINT.toString()}), decimals: ${targetDecimals}`
+    logDebug(
+      `PumpSwap output: ${output} target token (${MINT.toString()}), decimals: ${targetDecimals}`
     );
     return output;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting PumpSwap price:", errMsg);
+    logError(`Error getting PumpSwap price: ${errMsg}`);
     throw new Error(`Failed to get PumpSwap price: ${errMsg}`);
   }
 }
@@ -286,7 +287,7 @@ export async function getPumpSwapReversePrice(
     return Number(outputAmountBN.toString()) / 10 ** baseDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting PumpSwap reverse price:", errMsg);
+    logError(`Error getting PumpSwap reverse price: ${errMsg}`);
     throw new Error(`Failed to get PumpSwap reverse price: ${errMsg}`);
   }
 }
@@ -341,7 +342,7 @@ export async function getPumpSwapPoolPrice(connection: Connection): Promise<{
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting pool price:", errMsg);
+    logError(`Error getting pool price: ${errMsg}`);
     throw new Error(`Failed to get pool price: ${errMsg}`);
   }
 }
@@ -415,7 +416,7 @@ export async function calculatePriceImpact(
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error calculating price impact:", errMsg);
+    logError(`Error calculating price impact: ${errMsg}`);
     throw new Error(`Failed to calculate price impact: ${errMsg}`);
   }
 }
@@ -443,10 +444,10 @@ export function validatePoolConfig(): void {
     throw new Error("BASE_MINT environment variable is required");
   }
 
-  console.log("Pool configuration:");
-  console.log(`Pool Address: ${PUMPSWAP_POOL.toString()}`);
-  console.log(`Target Token: ${MINT.toString()}`);
-  console.log(`Base Token: ${BASE_MINT.toString()}`);
+  logInfo("Pool configuration:");
+  logInfo(`Pool Address: ${PUMPSWAP_POOL.toString()}`);
+  logInfo(`Target Token: ${MINT.toString()}`);
+  logInfo(`Base Token: ${BASE_MINT.toString()}`);
 }
 
 /**
@@ -467,19 +468,19 @@ export async function debugPoolStructure(
 ): Promise<void> {
   try {
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
-    console.log("=== POOL STRUCTURE DEBUG ===");
-    console.log(`Pool Address: ${pool.pubkey.toString()}`);
-    console.log(`Pool Base Mint: ${pool.base_mint.toString()}`);
-    console.log(`Pool Quote Mint: ${pool.quote_mint.toString()}`);
-    console.log(`Pool Bump: ${pool.pool_bump}`);
-    console.log(`Pool Index: ${pool.index}`);
-    console.log(`Creator: ${pool.creator.toString()}`);
-    console.log(`Coin Creator: ${pool.coin_creator.toString()}`);
-    console.log(`LP Mint: ${pool.lp_mint.toString()}`);
-    console.log(`LP Supply: ${pool.lp_supply.toString()}`);
-    console.log("Your Environment Variables:");
-    console.log(`BASE_MINT: ${BASE_MINT.toString()}`);
-    console.log(`MINT (target): ${MINT.toString()}`);
+    logInfo("=== POOL STRUCTURE DEBUG ===");
+    logInfo(`Pool Address: ${pool.pubkey.toString()}`);
+    logInfo(`Pool Base Mint: ${pool.base_mint.toString()}`);
+    logInfo(`Pool Quote Mint: ${pool.quote_mint.toString()}`);
+    logInfo(`Pool Bump: ${pool.pool_bump}`);
+    logInfo(`Pool Index: ${pool.index}`);
+    logInfo(`Creator: ${pool.creator.toString()}`);
+    logInfo(`Coin Creator: ${pool.coin_creator.toString()}`);
+    logInfo(`LP Mint: ${pool.lp_mint.toString()}`);
+    logInfo(`LP Supply: ${pool.lp_supply.toString()}`);
+    logInfo("Your Environment Variables:");
+    logInfo(`BASE_MINT: ${BASE_MINT.toString()}`);
+    logInfo(`MINT (target): ${MINT.toString()}`);
 
     // Check if your env vars match the pool structure
     const baseMatches = pool.base_mint.equals(BASE_MINT);
@@ -487,21 +488,21 @@ export async function debugPoolStructure(
     const baseMatchesTarget = pool.base_mint.equals(MINT);
     const quoteMatchesBase = pool.quote_mint.equals(BASE_MINT);
 
-    console.log(`\nMatching Analysis:`);
-    console.log(`Pool base == your BASE_MINT: ${baseMatches}`);
-    console.log(`Pool quote == your MINT: ${quoteMatches}`);
-    console.log(`Pool base == your MINT: ${baseMatchesTarget}`);
-    console.log(`Pool quote == your BASE_MINT: ${quoteMatchesBase}`);
+    logInfo(`\nMatching Analysis:`);
+    logInfo(`Pool base == your BASE_MINT: ${baseMatches}`);
+    logInfo(`Pool quote == your MINT: ${quoteMatches}`);
+    logInfo(`Pool base == your MINT: ${baseMatchesTarget}`);
+    logInfo(`Pool quote == your BASE_MINT: ${quoteMatchesBase}`);
 
     if (baseMatchesTarget && quoteMatchesBase) {
-      console.log(
+      logWarn(
         "\n🚨 ISSUE FOUND: Your BASE_MINT and MINT variables are swapped!"
       );
-      console.log("The pool's base token is what you call MINT (target token)");
-      console.log("The pool's quote token is what you call BASE_MINT");
+      logWarn("The pool's base token is what you call MINT (target token)");
+      logWarn("The pool's quote token is what you call BASE_MINT");
     }
   } catch (error) {
-    console.error("Error debugging pool structure:", error);
+    logError(`Error debugging pool structure: ${error}`);
   }
 }
 
@@ -530,15 +531,11 @@ export async function getPoolBalances(connection: Connection): Promise<{
       Number(quoteAccountInfo.value.amount) /
       10 ** quoteAccountInfo.value.decimals;
 
-    console.log(`\n=== POOL BALANCES ===`);
-    console.log(`Base token (${pool.base_mint.toString()}): ${baseBalance}`);
-    console.log(`Quote token (${pool.quote_mint.toString()}): ${quoteBalance}`);
-    console.log(
-      `Current pool ratio: 1 base = ${quoteBalance / baseBalance} quote`
-    );
-    console.log(
-      `Current pool ratio: 1 quote = ${baseBalance / quoteBalance} base`
-    );
+    logInfo(`\n=== POOL BALANCES ===`);
+    logInfo(`Base token (${pool.base_mint.toString()}): ${baseBalance}`);
+    logInfo(`Quote token (${pool.quote_mint.toString()}): ${quoteBalance}`);
+    logInfo(`Current pool ratio: 1 base = ${quoteBalance / baseBalance} quote`);
+    logInfo(`Current pool ratio: 1 quote = ${baseBalance / quoteBalance} base`);
 
     return {
       baseBalance,
@@ -547,7 +544,7 @@ export async function getPoolBalances(connection: Connection): Promise<{
       quoteToken: pool.quote_mint.toString(),
     };
   } catch (error) {
-    console.error("Error getting pool balances:", error);
+    logError(`Error getting pool balances: ${error}`);
     throw error;
   }
 }
@@ -577,8 +574,8 @@ export async function getPumpSwapPriceFixed(
         Math.floor(inputAmount * 10 ** inputDecimals)
       );
 
-      console.log(`Using swapAutocompleteQuoteFromBase`);
-      console.log(
+      logDebug(`Using swapAutocompleteQuoteFromBase`);
+      logDebug(
         `Input: ${inputAmount} tokens = ${inputAmountBN.toString()} smallest units (${inputDecimals} decimals)`
       );
 
@@ -596,8 +593,8 @@ export async function getPumpSwapPriceFixed(
         Math.floor(inputAmount * 10 ** inputDecimals)
       );
 
-      console.log(`Using swapAutocompleteBaseFromQuote`);
-      console.log(
+      logDebug(`Using swapAutocompleteBaseFromQuote`);
+      logDebug(
         `Input: ${inputAmount} tokens = ${inputAmountBN.toString()} smallest units (${inputDecimals} decimals)`
       );
 
@@ -613,15 +610,15 @@ export async function getPumpSwapPriceFixed(
 
     const output = Number(outputAmountBN.toString()) / 10 ** outputDecimals;
 
-    console.log(
+    logDebug(
       `Output: ${outputAmountBN.toString()} smallest units = ${output} tokens (${outputDecimals} decimals)`
     );
-    console.log(`Rate: 1 input token = ${output / inputAmount} output tokens`);
+    logDebug(`Rate: 1 input token = ${output / inputAmount} output tokens`);
 
     return output;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting PumpSwap price:", errMsg);
+    logError(`Error getting PumpSwap price: ${errMsg}`);
     throw new Error(`Failed to get PumpSwap price: ${errMsg}`);
   }
 }
@@ -655,7 +652,7 @@ async function getTokenDecimals(
     decimalsCache[mintAddress] = decimals;
     return decimals;
   } catch (error) {
-    console.error(`Failed to fetch decimals for mint ${mintAddress}:`, error);
+    logError(`Failed to fetch decimals for mint ${mintAddress}: ${error}`);
     return 9; // Default fallback
   }
 }

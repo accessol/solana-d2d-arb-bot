@@ -3,6 +3,7 @@ import { Connection, Keypair, clusterApiUrl, PublicKey } from "@solana/web3.js";
 import * as fs from "fs";
 import bs58 from "bs58";
 import dotenv from "dotenv";
+import { logDebug, logError, logInfo, logWarn } from "./logger";
 
 dotenv.config();
 
@@ -36,7 +37,7 @@ export function loadKeypair(): Keypair {
       const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf8"));
       return Keypair.fromSecretKey(Uint8Array.from(keypairData));
     } catch (error) {
-      console.warn(`Failed to load keypair from file: ${error}`);
+      logWarn(`Failed to load keypair from file: ${error}`);
     }
   }
 
@@ -47,7 +48,7 @@ export function loadKeypair(): Keypair {
       const privateKeyBytes = bs58.decode(privateKeyBase58);
       return Keypair.fromSecretKey(privateKeyBytes);
     } catch (error) {
-      console.warn(`Failed to load keypair from base58: ${error}`);
+      logWarn(`Failed to load keypair from base58: ${error}`);
     }
   }
 
@@ -81,13 +82,13 @@ export async function validateSolanaConfig(): Promise<{
   wallet: Keypair;
   publicKey: PublicKey;
 }> {
-  console.log("🔗 Validating Solana configuration...");
+  logInfo("🔗 Validating Solana configuration...");
 
   // Test connection
   const connection = getConnection();
   try {
     const slot = await connection.getSlot();
-    console.log(`✅ Connection successful - Current slot: ${slot}`);
+    logInfo(`✅ Connection successful - Current slot: ${slot}`);
   } catch (error) {
     throw new Error(`Failed to connect to Solana RPC: ${error}`);
   }
@@ -95,19 +96,19 @@ export async function validateSolanaConfig(): Promise<{
   // Load wallet
   const wallet = loadKeypair();
   const publicKey = wallet.publicKey;
-  console.log(`✅ Wallet loaded - Public key: ${publicKey.toString()}`);
+  logInfo(`✅ Wallet loaded - Public key: ${publicKey.toString()}`);
 
   // Check wallet balance
   try {
     const balance = await connection.getBalance(publicKey);
     const solBalance = balance / 1e9;
-    console.log(`💰 Wallet balance: ${solBalance.toFixed(4)} SOL`);
+    logInfo(`💰 Wallet balance: ${solBalance.toFixed(4)} SOL`);
 
     if (balance === 0) {
-      console.warn("⚠️  Warning: Wallet has 0 SOL balance");
+      logWarn("⚠️  Warning: Wallet has 0 SOL balance");
     }
   } catch (error) {
-    console.warn(`Failed to check wallet balance: ${error}`);
+    logWarn(`Failed to check wallet balance: ${error}`);
   }
 
   return { connection, wallet, publicKey };
@@ -129,7 +130,7 @@ export async function getConnectionWithRetry(
       return connection;
     } catch (error) {
       lastError = error as Error;
-      console.warn(`Connection attempt ${i + 1} failed: ${error}`);
+      logWarn(`Connection attempt ${i + 1} failed: ${error}`);
 
       if (i < maxRetries - 1) {
         // Wait before retrying (exponential backoff)
@@ -171,11 +172,11 @@ export function logSolanaConfig(): void {
   const rpcUrl = process.env.RPC_URL || clusterApiUrl("mainnet-beta");
   const network = getNetworkType();
 
-  console.log("🔧 Solana Configuration:");
-  console.log(`   Network: ${network.toUpperCase()}`);
-  console.log(`   RPC URL: ${rpcUrl}`);
-  console.log(`   Keypair Path: ${process.env.KEYPAIR_PATH || "Not set"}`);
-  console.log(
+  logInfo("🔧 Solana Configuration:");
+  logInfo(`   Network: ${network.toUpperCase()}`);
+  logInfo(`   RPC URL: ${rpcUrl}`);
+  logInfo(`   Keypair Path: ${process.env.KEYPAIR_PATH || "Not set"}`);
+  logInfo(
     `   Private Key: ${process.env.PRIVATE_KEY ? "Set (base58)" : "Not set"}`
   );
 }

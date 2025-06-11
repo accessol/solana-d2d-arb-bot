@@ -3,6 +3,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import DLMM from "@meteora-ag/dlmm";
 import dotenv from "dotenv";
 import BN from "bn.js";
+import { logDebug, logError, logInfo, logWarn } from "../logger";
 
 dotenv.config();
 
@@ -66,7 +67,7 @@ async function getTokenDecimals(
     decimalsCache[mintAddress] = decimals;
     return decimals;
   } catch (error) {
-    console.error(`Failed to fetch decimals for mint ${mintAddress}:`, error);
+    logError(`Failed to fetch decimals for mint ${mintAddress}: ${error}`);
     return 9; // Default fallback
   }
 }
@@ -121,7 +122,7 @@ async function fetchPoolData(
     return pool;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error fetching DLMM pool data:", errMsg);
+    logError(`Error fetching DLMM pool data: ${errMsg}`);
     throw new Error(`Failed to fetch DLMM pool data: ${errMsg}`);
   }
 }
@@ -158,7 +159,7 @@ export async function getDLMMPrice(
     return Number(quote.outAmount.toString()) / 10 ** baseDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM price:", errMsg);
+    logError(`Error getting DLMM price: ${errMsg}`);
     throw new Error(`Failed to get DLMM price: ${errMsg}`);
   }
 }
@@ -192,7 +193,7 @@ export async function getDLMMReversePrice(
     return Number(quote.outAmount.toString()) / 10 ** targetDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM reverse price:", errMsg);
+    logError(`Error getting DLMM reverse price: ${errMsg}`);
     throw new Error(`Failed to get DLMM reverse price: ${errMsg}`);
   }
 }
@@ -245,7 +246,7 @@ export async function getDLMMSwapQuote(
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM swap quote:", errMsg);
+    logError(`Error getting DLMM swap quote: ${errMsg}`);
     throw new Error(`Failed to get DLMM swap quote: ${errMsg}`);
   }
 }
@@ -287,7 +288,7 @@ export async function getDLMMPoolPrice(connection: Connection): Promise<{
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM pool price:", errMsg);
+    logError(`Error getting DLMM pool price: ${errMsg}`);
     throw new Error(`Failed to get DLMM pool price: ${errMsg}`);
   }
 }
@@ -340,7 +341,7 @@ export async function calculateDLMMPriceImpact(
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error calculating DLMM price impact:", errMsg);
+    logError(`Error calculating DLMM price impact: ${errMsg}`);
     throw new Error(`Failed to calculate DLMM price impact: ${errMsg}`);
   }
 }
@@ -385,7 +386,7 @@ export async function getDLMMBinInfo(
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM bin info:", errMsg);
+    logError(`Error getting DLMM bin info: ${errMsg}`);
     throw new Error(`Failed to get DLMM bin info: ${errMsg}`);
   }
 }
@@ -442,7 +443,7 @@ export async function getDLMMPoolStats(connection: Connection): Promise<{
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("Error getting DLMM pool stats:", errMsg);
+    logError(`Error getting DLMM pool stats: ${errMsg}`);
     throw new Error(`Failed to get DLMM pool stats: ${errMsg}`);
   }
 }
@@ -461,10 +462,10 @@ export function validateDLMMConfig(): void {
     throw new Error("BASE_MINT environment variable is required");
   }
 
-  console.log("DLMM Pool configuration:");
-  console.log(`Pool Address: ${DLMM_POOL.toString()}`);
-  console.log(`Target Token (A): ${MINT.toString()}`);
-  console.log(`Base Token (B): ${BASE_MINT.toString()}`);
+  logInfo("DLMM Pool configuration:");
+  logInfo(`Pool Address: ${DLMM_POOL.toString()}`);
+  logInfo(`Target Token (A): ${MINT.toString()}`);
+  logInfo(`Base Token (B): ${BASE_MINT.toString()}`);
 }
 
 /**
