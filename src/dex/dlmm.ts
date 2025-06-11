@@ -47,13 +47,28 @@ let poolCache: DLMMPoolInfo | null = null;
 let poolCacheTimestamp = 0;
 const CACHE_DURATION = parseInt(process.env.CACHE_DURATION || "60000"); // 1 minute cache
 
+// Decimals cache
+const decimalsCache: Record<string, number> = {};
+
 // Helper to get decimals for a mint (WSOL=9, USDC=6, fallback=9)
-function getTokenDecimals(mint: PublicKey): number {
-  if (mint.toString() === "So11111111111111111111111111111111111111112")
-    return 9; // WSOL
-  if (mint.toString() === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
-    return 6; // USDC
-  return 9;
+async function getTokenDecimals(
+  connection: Connection,
+  mint: PublicKey
+): Promise<number> {
+  const mintAddress = mint.toString();
+  if (decimalsCache[mintAddress] !== undefined) {
+    return decimalsCache[mintAddress];
+  }
+
+  try {
+    const supplyInfo = await connection.getTokenSupply(mint);
+    const decimals = supplyInfo.value.decimals;
+    decimalsCache[mintAddress] = decimals;
+    return decimals;
+  } catch (error) {
+    console.error(`Failed to fetch decimals for mint ${mintAddress}:`, error);
+    return 9; // Default fallback
+  }
 }
 
 /**
@@ -126,8 +141,8 @@ export async function getDLMMPrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-    const targetDecimals = getTokenDecimals(MINT);
-    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
     // inputAmount is in target token units (e.g., USDC)
     const inputAmountBN = new BN(
       Math.floor(inputAmount * 10 ** targetDecimals)
@@ -162,8 +177,8 @@ export async function getDLMMReversePrice(
 ): Promise<number> {
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
-    const baseDecimals = getTokenDecimals(BASE_MINT);
-    const targetDecimals = getTokenDecimals(MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
     // inputAmount is in base token units (WSOL)
     const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
     const binArrays = await dlmm.getBinArrayForSwap(true); // true for Y to X swap
@@ -198,8 +213,8 @@ export async function getDLMMSwapQuote(
   try {
     const dlmm = await DLMM.create(connection, DLMM_POOL);
     const swapYtoX = direction === "buy";
-    const baseDecimals = getTokenDecimals(BASE_MINT);
-    const targetDecimals = getTokenDecimals(MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
     const inputAmountBN = new BN(
       Math.floor(inputAmount * 10 ** (swapYtoX ? baseDecimals : targetDecimals))
     );

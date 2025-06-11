@@ -208,15 +208,6 @@ function manualDeserializePoolAccount(data: Buffer): PoolAccount {
   });
 }
 
-// Helper to get decimals for a mint (WSOL=9, USDC=6, fallback=9)
-function getTokenDecimals(mint: PublicKey): number {
-  if (mint.toString() === "So11111111111111111111111111111111111111112")
-    return 9; // WSOL
-  if (mint.toString() === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
-    return 6; // USDC
-  return 9;
-}
-
 const DEFAULT_SLIPPAGE = parseFloat(process.env.SLIPPAGE || "0.01");
 
 /**
@@ -235,7 +226,7 @@ export async function getPumpSwapPrice(
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
     // Convert inputAmount to BN in base token's smallest units
-    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
     const inputAmountBN = new BN(Math.floor(inputAmount * 10 ** baseDecimals));
     // Debug: print inputAmount, inputAmountBN, baseDecimals
     console.log(
@@ -250,7 +241,7 @@ export async function getPumpSwapPrice(
     // Debug: print outputAmountBN
     console.log(`[DEBUG] PumpSwap output BN: ${outputAmountBN.toString()}`);
     // Convert output to number in target token units
-    const targetDecimals = getTokenDecimals(MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
     const output = Number(outputAmountBN.toString()) / 10 ** targetDecimals;
     // Debug: print output and targetDecimals
     console.log(
@@ -280,7 +271,7 @@ export async function getPumpSwapReversePrice(
     const pool = await fetchPoolData(connection, PUMPSWAP_POOL);
     const pumpAmmSdk = new PumpAmmSdk(connection);
     // Convert inputAmount to BN in target token's smallest units
-    const targetDecimals = getTokenDecimals(MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
     const inputAmountBN = new BN(
       Math.floor(inputAmount * 10 ** targetDecimals)
     );
@@ -291,7 +282,7 @@ export async function getPumpSwapReversePrice(
       "quoteToBase"
     );
     // Convert output to number in base token units
-    const baseDecimals = getTokenDecimals(BASE_MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
     return Number(outputAmountBN.toString()) / 10 ** baseDecimals;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -316,8 +307,8 @@ export async function getPumpSwapPoolPrice(connection: Connection): Promise<{
     const pumpAmmSdk = new PumpAmmSdk(connection);
 
     // Use BN for amounts
-    const baseDecimals = getTokenDecimals(BASE_MINT);
-    const targetDecimals = getTokenDecimals(MINT);
+    const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
+    const targetDecimals = await getTokenDecimals(connection, MINT);
     const baseAmountBN = new BN(10 ** baseDecimals); // 1 base token
     const quoteAmountBN = new BN(10 ** targetDecimals); // 1 target token
 
@@ -382,7 +373,7 @@ export async function calculatePriceImpact(
     let currentPrice: number;
 
     if (direction === "baseToQuote") {
-      const baseDecimals = getTokenDecimals(BASE_MINT);
+      const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
       const inputAmountBN = new BN(
         Math.floor(inputAmount * 10 ** baseDecimals)
       );
@@ -392,11 +383,11 @@ export async function calculatePriceImpact(
         slippage,
         "baseToQuote"
       );
-      const targetDecimals = getTokenDecimals(MINT);
+      const targetDecimals = await getTokenDecimals(connection, MINT);
       outputAmount = Number(outputAmountBN.toString()) / 10 ** targetDecimals;
       currentPrice = poolPriceInfo.baseToQuotePrice;
     } else {
-      const targetDecimals = getTokenDecimals(MINT);
+      const targetDecimals = await getTokenDecimals(connection, MINT);
       const inputAmountBN = new BN(
         Math.floor(inputAmount * 10 ** targetDecimals)
       );
@@ -406,7 +397,7 @@ export async function calculatePriceImpact(
         slippage,
         "quoteToBase"
       );
-      const baseDecimals = getTokenDecimals(BASE_MINT);
+      const baseDecimals = await getTokenDecimals(connection, BASE_MINT);
       outputAmount = Number(outputAmountBN.toString()) / 10 ** baseDecimals;
       currentPrice = poolPriceInfo.quoteToBasePrice;
     }
@@ -580,8 +571,8 @@ export async function getPumpSwapPriceFixed(
 
     if (direction === "baseToQuote") {
       // Swapping from pool's base token (USDC) to pool's quote token (WSOL)
-      inputDecimals = getTokenDecimals(MINT);
-      outputDecimals = getTokenDecimals(BASE_MINT);
+      inputDecimals = await getTokenDecimals(connection, MINT);
+      outputDecimals = await getTokenDecimals(connection, BASE_MINT);
       const inputAmountBN = new BN(
         Math.floor(inputAmount * 10 ** inputDecimals)
       );
@@ -599,8 +590,8 @@ export async function getPumpSwapPriceFixed(
       );
     } else if (direction === "quoteToBase") {
       // Swapping from pool's quote token (WSOL) to pool's base token (USDC)
-      inputDecimals = getTokenDecimals(BASE_MINT);
-      outputDecimals = getTokenDecimals(MINT);
+      inputDecimals = await getTokenDecimals(connection, BASE_MINT);
+      outputDecimals = await getTokenDecimals(connection, MINT);
       const inputAmountBN = new BN(
         Math.floor(inputAmount * 10 ** inputDecimals)
       );
@@ -637,3 +628,34 @@ export async function getPumpSwapPriceFixed(
 
 // Export types and constants for external use
 export { PUMPSWAP_POOL, MINT, BASE_MINT, PoolAccount };
+
+/**
+ * Token decimals cache and retrieval
+ */
+const decimalsCache: Record<string, number> = {};
+
+/**
+ * Get the number of decimals for a given token mint
+ * @param connection - Solana connection
+ * @param mint - Token mint address
+ * @returns Number of decimals for the token
+ */
+async function getTokenDecimals(
+  connection: Connection,
+  mint: PublicKey
+): Promise<number> {
+  const mintAddress = mint.toString();
+  if (decimalsCache[mintAddress] !== undefined) {
+    return decimalsCache[mintAddress];
+  }
+
+  try {
+    const supplyInfo = await connection.getTokenSupply(mint);
+    const decimals = supplyInfo.value.decimals;
+    decimalsCache[mintAddress] = decimals;
+    return decimals;
+  } catch (error) {
+    console.error(`Failed to fetch decimals for mint ${mintAddress}:`, error);
+    return 9; // Default fallback
+  }
+}
