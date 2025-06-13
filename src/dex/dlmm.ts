@@ -462,7 +462,7 @@ export function validateDLMMConfig(): void {
     throw new Error("BASE_MINT environment variable is required");
   }
 
-  logInfo("☄️DLMM Pool configuration:");
+  logInfo("☄️- DLMM Pool configuration:");
   logInfo(`Pool Address: ${DLMM_POOL.toString()}`);
   logInfo(`Target Token (A): ${MINT.toString()}`);
   logInfo(`Base Token (B): ${BASE_MINT.toString()}`);
