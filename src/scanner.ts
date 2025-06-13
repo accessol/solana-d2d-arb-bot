@@ -2,17 +2,18 @@
 import { Connection } from "@solana/web3.js";
 import {
   getPumpSwapPrice,
-  getPumpSwapReversePrice,
-  validatePoolConfig as validatePumpConfig,
   debugPoolStructure,
-  getPoolBalances,
   getPumpSwapPriceFixed,
-} from "./dex/pump";
+} from "./dex/PumpSwap/pump-pricing";
+import {
+  getPoolBalances,
+  validatePoolConfig as validatePumpConfig,
+} from "./dex/PumpSwap/pump-core";
 import {
   getDLMMPrice,
   getDLMMReversePrice,
-  validateDLMMConfig,
-} from "./dex/dlmm";
+} from "./dex/MeteoraDLMM/dlmm_pricing";
+import { validateDLMMConfig } from "./dex/MeteoraDLMM/dlmm_core";
 import { getConnection, validateSolanaConfig, logSolanaConfig } from "./solana";
 import { logInfo, logWarn, logError, formatOpportunity } from "./logger";
 
