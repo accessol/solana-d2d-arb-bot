@@ -22,7 +22,31 @@ const PROCESS_DELAY = parseInt(process.env.PROCESS_DELAY || "3000");
 const WSOL_TRADE_SIZE = parseFloat(process.env.WSOL_TRADE_SIZE || "0.1");
 const DRY_RUN = process.env.DRY_RUN === "true";
 
-// Arbitrage opportunity interface
+// Enhanced swap details interface
+interface SwapDetails {
+  ammKey: string;
+  label: string;
+  inputMint: string;
+  outputMint: string;
+  inAmount: number;
+  outAmount: number;
+  feeAmount: number;
+  slippageBps: number;
+  priceImpactPct: number;
+  feeBps: number;
+}
+
+// Interface for enhanced pricing functions that return detailed swap info
+interface SwapQuote {
+  outputAmount: number;
+  feeAmount: number;
+  priceImpactPct: number;
+  ammKey: string;
+  slippageBps: number;
+  feeBps: number;
+}
+
+// Enhanced arbitrage opportunity interface
 interface ArbitrageOpportunity {
   direction: "PUMP-TO-DLMM" | "DLMM-TO-PUMP";
   buyAmount: number;
@@ -32,6 +56,9 @@ interface ArbitrageOpportunity {
   buyExchange: string;
   sellExchange: string;
   timestamp: Date;
+  // Enhanced swap details
+  firstSwap: SwapDetails;
+  secondSwap: SwapDetails;
 }
 
 /**
@@ -108,7 +135,8 @@ export async function startScanner(connection: Connection) {
               bestOpportunity = opp;
             }
 
-            logInfo("\n" + formatOpportunity(opp));
+            // Enhanced logging with detailed swap information
+            logDetailedOpportunity(opp);
 
             if (DRY_RUN) {
               logInfo(`   🔍 DRY RUN: Trade simulation only`);
@@ -180,6 +208,60 @@ export async function startScanner(connection: Connection) {
 }
 
 /**
+ * Enhanced logging function for detailed swap information
+ */
+function logDetailedOpportunity(opportunity: ArbitrageOpportunity) {
+  logInfo(`\n🟢 ARBITRAGE OPPORTUNITY DETECTED!`);
+  logInfo(`Route: ${opportunity.direction}`);
+  logInfo(
+    `Total Profit: ${opportunity.profit.toFixed(
+      6
+    )} WSOL (${opportunity.profitPct.toFixed(3)}%)`
+  );
+  logInfo(`Timestamp: ${opportunity.timestamp.toISOString()}`);
+
+  if (opportunity.direction === "PUMP-TO-DLMM") {
+    // First swap: PumpSwap
+    logInfo(`\n💊 PumpSwap Swap Details (Step 1)`);
+    logSwapDetails(opportunity.firstSwap);
+
+    // Second swap: DLMM
+    logInfo(`\n☄️ DLMM Swap Details (Step 2)`);
+    logSwapDetails(opportunity.secondSwap);
+  } else {
+    // First swap: DLMM
+    logInfo(`\n☄️ DLMM Swap Details (Step 1)`);
+    logSwapDetails(opportunity.firstSwap);
+
+    // Second swap: PumpSwap
+    logInfo(`\n💊 PumpSwap Swap Details (Step 2)`);
+    logSwapDetails(opportunity.secondSwap);
+  }
+
+  logInfo(`\n📊 Route Summary:`);
+  logInfo(`   Input:  ${opportunity.buyAmount.toFixed(6)} WSOL`);
+  logInfo(`   Output: ${opportunity.sellAmount.toFixed(6)} WSOL`);
+  logInfo(`   Net Profit: ${opportunity.profit.toFixed(6)} WSOL`);
+  logInfo(`   ROI: ${opportunity.profitPct.toFixed(3)}%`);
+}
+
+/**
+ * Helper function to log individual swap details
+ */
+function logSwapDetails(swap: SwapDetails) {
+  logInfo(`   ammKey: ${swap.ammKey}`);
+  logInfo(`   label: ${swap.label}`);
+  logInfo(`   inputMint: ${swap.inputMint}`);
+  logInfo(`   outputMint: ${swap.outputMint}`);
+  logInfo(`   inAmount: ${swap.inAmount.toFixed(6)}`);
+  logInfo(`   outAmount: ${swap.outAmount.toFixed(6)}`);
+  logInfo(`   feeAmount: ${swap.feeAmount.toFixed(6)}`);
+  logInfo(`   slippageBps: ${swap.slippageBps}`);
+  logInfo(`   priceImpactPct: ${swap.priceImpactPct.toFixed(4)}%`);
+  logInfo(`   feeBps: ${swap.feeBps}`);
+}
+
+/**
  * Check arbitrage: Buy on PumpSwap, Sell on DLMM
  */
 async function checkPumpToDLMM(
@@ -187,41 +269,61 @@ async function checkPumpToDLMM(
   wsolAmount: number
 ): Promise<ArbitrageOpportunity | null> {
   try {
-    // Step 1: Buy target token on PumpSwap with WSOL
-    const targetTokenAmount = await getPumpSwapPriceFixed(
+    // Step 1: Get detailed quote for PumpSwap (WSOL → Target Token)
+    const pumpQuote = await getPumpSwapQuote(
       connection,
       wsolAmount,
-      0.01,
-      "quoteToBase" // Correct direction for WSOL → USDC
-    );
-    // Debug: log targetTokenAmount and units
-    logInfo(
-      `PumpSwap: For ${wsolAmount} WSOL, get ${targetTokenAmount} target tokens`
+      "quoteToBase"
     );
 
-    // Step 2: Sell target token on DLMM for WSOL
-    const wsolReceived = await getDLMMPrice(
+    // Step 2: Get detailed quote for DLMM (Target Token → WSOL)
+    const dlmmQuote = await getDLMMQuote(
       connection,
-      targetTokenAmount,
-      0.005
-    );
-    // Debug: log wsolReceived and units
-    logInfo(
-      `DLMM: For ${targetTokenAmount} target tokens, get ${wsolReceived} WSOL`
+      pumpQuote.outputAmount,
+      "baseToQuote"
     );
 
-    const profit = wsolReceived - wsolAmount;
+    const profit = dlmmQuote.outputAmount - wsolAmount;
     const profitPct = (profit / wsolAmount) * 100;
+
+    // Create detailed swap information with dynamic data
+    const firstSwap: SwapDetails = {
+      ammKey: pumpQuote.ammKey,
+      label: "Pump.fun AMM",
+      inputMint: getWSOLMint(),
+      outputMint: getTargetTokenMint(),
+      inAmount: wsolAmount,
+      outAmount: pumpQuote.outputAmount,
+      feeAmount: pumpQuote.feeAmount,
+      slippageBps: pumpQuote.slippageBps,
+      priceImpactPct: pumpQuote.priceImpactPct,
+      feeBps: pumpQuote.feeBps,
+    };
+
+    const secondSwap: SwapDetails = {
+      ammKey: dlmmQuote.ammKey,
+      label: "Meteora DLMM Program",
+      inputMint: getTargetTokenMint(),
+      outputMint: getWSOLMint(),
+      inAmount: pumpQuote.outputAmount,
+      outAmount: dlmmQuote.outputAmount,
+      feeAmount: dlmmQuote.feeAmount,
+      slippageBps: dlmmQuote.slippageBps,
+      priceImpactPct: dlmmQuote.priceImpactPct,
+      feeBps: dlmmQuote.feeBps,
+    };
 
     return {
       direction: "PUMP-TO-DLMM",
       buyAmount: wsolAmount,
-      sellAmount: wsolReceived,
+      sellAmount: dlmmQuote.outputAmount,
       profit,
       profitPct,
-      buyExchange: "PumpSwap",
+      buyExchange: "Pump.fun",
       sellExchange: "Meteora DLMM",
       timestamp: new Date(),
+      firstSwap,
+      secondSwap,
     };
   } catch (error) {
     logWarn(
@@ -241,42 +343,57 @@ async function checkDLMMToPump(
   wsolAmount: number
 ): Promise<ArbitrageOpportunity | null> {
   try {
-    // Step 1: Buy target token on DLMM with WSOL
-    const targetTokenAmount = await getDLMMReversePrice(
+    // Step 1: Get detailed quote for DLMM (WSOL → Target Token)
+    const dlmmQuote = await getDLMMQuote(connection, wsolAmount, "quoteToBase");
+
+    // Step 2: Get detailed quote for PumpSwap (Target Token → WSOL)
+    const pumpQuote = await getPumpSwapQuote(
       connection,
-      wsolAmount,
-      0.005
-    );
-    // Debug: log targetTokenAmount and units
-    logInfo(
-      `DLMM: For ${wsolAmount} WSOL, get ${targetTokenAmount} target tokens`
+      dlmmQuote.outputAmount,
+      "baseToQuote"
     );
 
-    // Step 2: Sell target token on PumpSwap for WSOL    // Debug the reverse swap as well
-    logInfo("\nDebug reverse swap:");
-    const wsolReceived = await getPumpSwapPriceFixed(
-      connection,
-      targetTokenAmount,
-      0.01,
-      "baseToQuote" // Correct direction for USDC → WSOL
-    );
-    // Debug: log wsolReceived and units
-    logInfo(
-      `PumpSwap: For ${targetTokenAmount} target tokens, get ${wsolReceived} WSOL`
-    );
-
-    const profit = wsolReceived - wsolAmount;
+    const profit = pumpQuote.outputAmount - wsolAmount;
     const profitPct = (profit / wsolAmount) * 100;
+
+    // Create detailed swap information with dynamic data
+    const firstSwap: SwapDetails = {
+      ammKey: dlmmQuote.ammKey,
+      label: "Meteora DLMM Program",
+      inputMint: getWSOLMint(),
+      outputMint: getTargetTokenMint(),
+      inAmount: wsolAmount,
+      outAmount: dlmmQuote.outputAmount,
+      feeAmount: dlmmQuote.feeAmount,
+      slippageBps: dlmmQuote.slippageBps,
+      priceImpactPct: dlmmQuote.priceImpactPct,
+      feeBps: dlmmQuote.feeBps,
+    };
+
+    const secondSwap: SwapDetails = {
+      ammKey: pumpQuote.ammKey,
+      label: "Pump.fun AMM",
+      inputMint: getTargetTokenMint(),
+      outputMint: getWSOLMint(),
+      inAmount: dlmmQuote.outputAmount,
+      outAmount: pumpQuote.outputAmount,
+      feeAmount: pumpQuote.feeAmount,
+      slippageBps: pumpQuote.slippageBps,
+      priceImpactPct: pumpQuote.priceImpactPct,
+      feeBps: pumpQuote.feeBps,
+    };
 
     return {
       direction: "DLMM-TO-PUMP",
       buyAmount: wsolAmount,
-      sellAmount: wsolReceived,
+      sellAmount: pumpQuote.outputAmount,
       profit,
       profitPct,
       buyExchange: "Meteora DLMM",
-      sellExchange: "PumpSwap",
+      sellExchange: "Pump.fun",
       timestamp: new Date(),
+      firstSwap,
+      secondSwap,
     };
   } catch (error) {
     logWarn(
@@ -286,6 +403,140 @@ async function checkDLMMToPump(
     );
     return null;
   }
+}
+
+/**
+ * Helper functions to get mint addresses dynamically
+ */
+function getWSOLMint(): string {
+  return process.env.BASE_MINT || "So11111111111111111111111111111111111111112";
+}
+
+function getTargetTokenMint(): string {
+  const mint = process.env.MINT;
+  if (!mint) {
+    throw new Error("MINT not configured in environment variables");
+  }
+  return mint;
+}
+
+/**
+ * Enhanced PumpSwap quote function - you'll need to implement this
+ * based on your existing pump-pricing.ts functions
+ */
+async function getPumpSwapQuote(
+  connection: Connection,
+  inputAmount: number,
+  direction: "quoteToBase" | "baseToQuote"
+): Promise<SwapQuote> {
+  try {
+    // Get the basic price from your existing function
+    const outputAmount = await getPumpSwapPriceFixed(
+      connection,
+      inputAmount,
+      0.01,
+      direction
+    );
+
+    // You'll need to enhance your PumpSwap functions to return these details
+    // This is a placeholder - implement based on your actual PumpSwap integration
+    return {
+      outputAmount,
+      feeAmount: calculatePumpSwapFee(inputAmount),
+      priceImpactPct: await calculatePumpSwapPriceImpact(
+        connection,
+        inputAmount
+      ),
+      ammKey: await getPumpSwapAMMKey(connection),
+      slippageBps: 100, // 1% - get from your pool config
+      feeBps: 100, // 1% - get from your pool config
+    };
+  } catch (error) {
+    throw new Error(`PumpSwap quote failed: ${error}`);
+  }
+}
+
+/**
+ * Enhanced DLMM quote function - you'll need to implement this
+ * based on your existing dlmm_pricing.ts functions
+ */
+async function getDLMMQuote(
+  connection: Connection,
+  inputAmount: number,
+  direction: "quoteToBase" | "baseToQuote"
+): Promise<SwapQuote> {
+  try {
+    // Get the basic price from your existing function
+    const outputAmount =
+      direction === "quoteToBase"
+        ? await getDLMMReversePrice(connection, inputAmount, 0.005)
+        : await getDLMMPrice(connection, inputAmount, 0.005);
+
+    // You'll need to enhance your DLMM functions to return these details
+    // This is a placeholder - implement based on your actual DLMM integration
+    return {
+      outputAmount,
+      feeAmount: calculateDLMMFee(inputAmount),
+      priceImpactPct: await calculateDLMMPriceImpact(connection, inputAmount),
+      ammKey: await getDLMMAMMKey(connection),
+      slippageBps: 50, // 0.5% - get from your pool config
+      feeBps: 50, // 0.5% - get from your pool config
+    };
+  } catch (error) {
+    throw new Error(`DLMM quote failed: ${error}`);
+  }
+}
+
+/**
+ * Helper functions to calculate fees and get AMM keys
+ * You'll need to implement these based on your actual DEX integrations
+ */
+function calculatePumpSwapFee(inputAmount: number): number {
+  // Implement based on your PumpSwap fee structure
+  return inputAmount * 0.01; // 1% assumption
+}
+
+function calculateDLMMFee(inputAmount: number): number {
+  // Implement based on your DLMM fee structure
+  return inputAmount * 0.005; // 0.5% assumption
+}
+
+async function calculatePumpSwapPriceImpact(
+  connection: Connection,
+  inputAmount: number
+): Promise<number> {
+  // Implement based on your PumpSwap pool liquidity data
+  // This is a simplified calculation - you should use actual pool reserves
+  return Math.min(inputAmount / 10, 2.0); // Placeholder calculation
+}
+
+async function calculateDLMMPriceImpact(
+  connection: Connection,
+  inputAmount: number
+): Promise<number> {
+  // Implement based on your DLMM pool liquidity data
+  // This is a simplified calculation - you should use actual bin liquidity
+  return Math.min(inputAmount / 20, 1.0); // Placeholder calculation
+}
+
+async function getPumpSwapAMMKey(connection: Connection): Promise<string> {
+  // Get the actual AMM key from your PumpSwap pool
+  // This might come from your pool configuration or be fetched dynamically
+  const ammKey = process.env.PUMPSWAP_POOL;
+  if (!ammKey) {
+    throw new Error("PUMPSWAP_POOL not configured");
+  }
+  return ammKey;
+}
+
+async function getDLMMAMMKey(connection: Connection): Promise<string> {
+  // Get the actual AMM key from your DLMM pool
+  // This might come from your pool configuration or be fetched dynamically
+  const ammKey = process.env.DLMM_POOL;
+  if (!ammKey) {
+    throw new Error("DLMM_POOL not configured");
+  }
+  return ammKey;
 }
 
 /**
@@ -423,4 +674,4 @@ function delay(ms: number): Promise<void> {
 }
 
 // Export for external use
-export type { ArbitrageOpportunity };
+export type { ArbitrageOpportunity, SwapDetails };
